@@ -1,0 +1,23 @@
+{
+  "manifest_version": 3,
+  "name": "Focus Roast",
+  "version": "1.0.0",
+  "description": "Extension qui analyse ta productivité",
+  "permissions": ["tabs", "activeTab", "scripting", "storage"],
+  "host_permissions": ["<all_urls>", "http://localhost:3000/*"],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Focus Roast"
+  }
+}

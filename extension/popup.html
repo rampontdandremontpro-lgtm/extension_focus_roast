@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <title>Focus Roast</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <main class="container">
+    <header class="header">
+      <h1>🔥 Focus Roast</h1>
+      <p>Ton coach de productivité</p>
+    </header>
+
+    <section class="card">
+      <h2>Site actuel</h2>
+
+      <p><strong>Domaine :</strong> <span id="domain">Chargement...</span></p>
+      <p><strong>Catégorie :</strong> <span id="category">...</span></p>
+      <p><strong>Source :</strong> <span id="source">...</span></p>
+
+      <p class="message" id="message">Analyse en cours...</p>
+    </section>
+
+    <section class="card">
+      <h2>Timer page actuelle</h2>
+      <p class="timer" id="pageTimer">00:00:00</p>
+    </section>
+
+    <section class="card">
+      <h2>Timer total</h2>
+      <p class="timer total" id="totalTimer">00:00:00</p>
+    </section>
+
+    <button id="refreshBtn">Rafraîchir</button>
+  </main>
+
+  <script src="popup.js"></script>
+</body>
+</html>

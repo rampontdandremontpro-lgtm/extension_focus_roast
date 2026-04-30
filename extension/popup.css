@@ -1,0 +1,78 @@
+body {
+  margin: 0;
+  width: 360px;
+  font-family: Arial, sans-serif;
+  background: linear-gradient(180deg, #120b0b, #1f0f0f);
+  color: white;
+}
+
+.container {
+  padding: 18px;
+}
+
+.header {
+  text-align: center;
+  margin-bottom: 18px;
+}
+
+.header h1 {
+  margin: 0;
+  font-size: 26px;
+  background: linear-gradient(90deg, #CF1B1B, #F19430, #FBE15F);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.header p {
+  margin: 8px 0 0;
+  font-size: 13px;
+  color: #d7cfcf;
+}
+
+.card {
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 18px;
+  padding: 16px;
+  margin-bottom: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+
+.card h2 {
+  margin-top: 0;
+  font-size: 18px;
+}
+
+.card p {
+  font-size: 14px;
+}
+
+.message {
+  padding: 12px;
+  border-radius: 14px;
+  font-weight: bold;
+  margin-top: 12px;
+  text-align: center;
+}
+
+.timer {
+  text-align: center;
+  font-size: 34px;
+  font-weight: bold;
+  color: #FBE15F;
+}
+
+button {
+  width: 100%;
+  border: none;
+  border-radius: 14px;
+  padding: 13px;
+  background: linear-gradient(135deg, #ED6D2D, #F19430);
+  color: white;
+  font-weight: bold;
+  cursor: pointer;
+}
+
+button:hover {
+  opacity: 0.9;
+}
