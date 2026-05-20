@@ -32,9 +32,16 @@
       <p class="timer total" id="totalTimer">00:00:00</p>
     </section>
 
+    <section class="card">
+      <h2>Stats du jour</h2>
+      <canvas id="statsChart" width="280" height="280"></canvas>
+      <p class="global-message" id="globalMessage">Chargement des stats...</p>
+    </section>
+
     <button id="refreshBtn">Rafraîchir</button>
   </main>
 
+  <script src="libs/chart.min.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>
