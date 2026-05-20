@@ -6,8 +6,7 @@ const pageTimerElement = document.getElementById("pageTimer");
 const totalTimerElement = document.getElementById("totalTimer");
 const refreshBtn = document.getElementById("refreshBtn");
 
-let pageTimerInterval = null;
-let totalTimerInterval = null;
+let timerInterval = null;
 
 function formatTime(milliseconds) {
   const totalSeconds = Math.floor(milliseconds / 1000);
@@ -20,14 +19,14 @@ function formatTime(milliseconds) {
 }
 
 function formatSource(source) {
-  const sourceLabels = {
+  const labels = {
     known_site: "Site connu",
     url_keyword: "Mot-clé URL",
     page_content: "Contenu page",
     neutral: "Neutre"
   };
 
-  return sourceLabels[source] || source;
+  return labels[source] || source;
 }
 
 function getCategoryStyle(category) {
@@ -43,26 +42,16 @@ function getCategoryStyle(category) {
   }
 }
 
-function startPageTimer(startTime) {
-  if (pageTimerInterval) {
-    clearInterval(pageTimerInterval);
+function getCurrentElapsed(session) {
+  if (!session) {
+    return 0;
   }
 
-  pageTimerInterval = setInterval(() => {
-    const elapsed = Date.now() - startTime;
-    pageTimerElement.textContent = formatTime(elapsed);
-  }, 1000);
-}
-
-function startTotalTimer(startTime) {
-  if (totalTimerInterval) {
-    clearInterval(totalTimerInterval);
+  if (session.isActive && session.lastStartedAt) {
+    return session.accumulatedMs + (Date.now() - session.lastStartedAt);
   }
 
-  totalTimerInterval = setInterval(() => {
-    const elapsed = Date.now() - startTime;
-    totalTimerElement.textContent = formatTime(elapsed);
-  }, 1000);
+  return session.accumulatedMs || 0;
 }
 
 async function loadCurrentSession() {
@@ -71,7 +60,7 @@ async function loadCurrentSession() {
     "totalTracking"
   ]);
 
-  const session = result.currentSession;
+  let session = result.currentSession;
   const totalTracking = result.totalTracking;
 
   if (!session) {
@@ -80,6 +69,7 @@ async function loadCurrentSession() {
     sourceElement.textContent = "Inconnue";
     messageElement.textContent = "Ouvre un site pour commencer.";
     pageTimerElement.textContent = "00:00:00";
+    totalTimerElement.textContent = "00:00:00";
     return;
   }
 
@@ -89,18 +79,30 @@ async function loadCurrentSession() {
 
   messageElement.textContent = session.message;
   messageElement.style.background = getCategoryStyle(session.category);
-  messageElement.style.color =
-    session.category === "Productif" ? "#000" : "#fff";
+  messageElement.style.color = session.category === "Productif" ? "#000" : "#fff";
 
-  startPageTimer(session.startTime);
-
-  if (totalTracking?.startTime) {
-    startTotalTimer(totalTracking.startTime);
+  if (timerInterval) {
+    clearInterval(timerInterval);
   }
+
+  timerInterval = setInterval(async () => {
+    const freshData = await chrome.storage.local.get([
+      "currentSession",
+      "totalTracking"
+    ]);
+
+    session = freshData.currentSession;
+
+    pageTimerElement.textContent = formatTime(getCurrentElapsed(session));
+
+    if (freshData.totalTracking?.startTime) {
+      totalTimerElement.textContent = formatTime(
+        Date.now() - freshData.totalTracking.startTime
+      );
+    }
+  }, 1000);
 }
 
-refreshBtn.addEventListener("click", async () => {
-  await loadCurrentSession();
-});
+refreshBtn.addEventListener("click", loadCurrentSession);
 
 loadCurrentSession();

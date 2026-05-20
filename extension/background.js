@@ -1,17 +1,34 @@
 import { getDomainFromUrl, classifySite, getOpeningMessage } from "./classifier.js";
 
+const API_BASE_URL = "http://localhost:3000";
+
 async function getStoredData() {
   const data = await chrome.storage.local.get([
     "tabSessions",
     "currentSession",
-    "totalTracking"
+    "totalTracking",
+    "activeTabId"
   ]);
 
   return {
     tabSessions: data.tabSessions || {},
     currentSession: data.currentSession || null,
-    totalTracking: data.totalTracking || null
+    totalTracking: data.totalTracking || { startTime: Date.now() },
+    activeTabId: data.activeTabId || null
   };
+}
+
+async function saveData(data) {
+  await chrome.storage.local.set(data);
+}
+
+function isBrowserInternalPage(url) {
+  return (
+    url.startsWith("chrome://") ||
+    url.startsWith("chrome-extension://") ||
+    url.startsWith("edge://") ||
+    url.startsWith("about:")
+  );
 }
 
 async function getPageContent(tabId) {
@@ -19,7 +36,7 @@ async function getPageContent(tabId) {
     return await chrome.tabs.sendMessage(tabId, {
       type: "GET_PAGE_CONTENT"
     });
-  } catch (error) {
+  } catch {
     return null;
   }
 }
@@ -32,61 +49,129 @@ async function showRoastOnPage(tabId, message, category) {
         text: message,
         category
       });
-    } catch (error) {
-      console.log("Impossible d'afficher le message sur cette page.", error);
+    } catch {
+      console.log("Message non affichable sur cette page.");
     }
   }, 800);
 }
 
-async function initTotalTracking() {
-  const { totalTracking } = await getStoredData();
+function pauseSession(session) {
+  if (!session || !session.isActive) {
+    return session;
+  }
 
-  if (!totalTracking) {
-    await chrome.storage.local.set({
-      totalTracking: {
-        startTime: Date.now()
-      }
+  return {
+    ...session,
+    accumulatedMs: session.accumulatedMs + (Date.now() - session.lastStartedAt),
+    lastStartedAt: null,
+    isActive: false
+  };
+}
+
+function resumeSession(session) {
+  return {
+    ...session,
+    lastStartedAt: Date.now(),
+    isActive: true
+  };
+}
+
+async function startBackendSession(session) {
+  try {
+    const response = await fetch(`${API_BASE_URL}/sessions/start`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        domain: session.domain,
+        name: session.domain,
+        pageUrl: session.url,
+        pageTitle: session.pageTitle,
+        category: session.category,
+        classificationSource: session.source
+      })
     });
+
+    if (!response.ok) {
+      return null;
+    }
+
+    const data = await response.json();
+
+    return data.sessionId || data.id || null;
+  } catch {
+    console.log("Backend indisponible pour /sessions/start.");
+    return null;
   }
 }
 
-async function analyseCurrentTab(tab, options = { showMessageIfNew: true }) {
-  if (!tab || !tab.url) return;
-
-  if (
-    tab.url.startsWith("chrome://") ||
-    tab.url.startsWith("chrome-extension://") ||
-    tab.url.startsWith("edge://") ||
-    tab.url.startsWith("about:")
-  ) {
+async function endBackendSession(session) {
+  if (!session || !session.backendSessionId) {
     return;
   }
 
-  await initTotalTracking();
+  try {
+    await fetch(`${API_BASE_URL}/sessions/end`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        sessionId: session.backendSessionId,
+        durationSeconds: Math.floor(session.accumulatedMs / 1000)
+      })
+    });
+  } catch {
+    console.log("Backend indisponible pour /sessions/end.");
+  }
+}
+
+async function analyseTab(tab, shouldShowMessage = true) {
+  if (!tab || !tab.url || isBrowserInternalPage(tab.url)) {
+    return;
+  }
+
+  const data = await getStoredData();
+  const tabSessions = data.tabSessions;
+  const totalTracking = data.totalTracking;
+  let activeTabId = data.activeTabId;
+
+  if (!totalTracking.startTime) {
+    totalTracking.startTime = Date.now();
+  }
+
+  if (activeTabId && activeTabId !== tab.id && tabSessions[activeTabId]) {
+    tabSessions[activeTabId] = pauseSession(tabSessions[activeTabId]);
+  }
+
+  activeTabId = tab.id;
 
   const domain = getDomainFromUrl(tab.url);
-  const { tabSessions } = await getStoredData();
-
   const existingSession = tabSessions[tab.id];
 
-  const isSameDomain =
-    existingSession && existingSession.domain === domain;
-
-  if (isSameDomain) {
-    const updatedSession = {
+  if (existingSession && existingSession.domain === domain) {
+    const resumedSession = resumeSession({
       ...existingSession,
       url: tab.url
-    };
-
-    tabSessions[tab.id] = updatedSession;
-
-    await chrome.storage.local.set({
-      tabSessions,
-      currentSession: updatedSession
     });
 
-    console.log("Même domaine, timer conservé :", updatedSession);
+    tabSessions[tab.id] = resumedSession;
+
+    await saveData({
+      tabSessions,
+      currentSession: resumedSession,
+      totalTracking,
+      activeTabId
+    });
+
+    console.log("Session reprise :", resumedSession);
     return;
+  }
+
+  if (existingSession && existingSession.domain !== domain) {
+    const endedSession = pauseSession(existingSession);
+    await endBackendSession(endedSession);
   }
 
   const pageContent = await getPageContent(tab.id);
@@ -96,54 +181,69 @@ async function analyseCurrentTab(tab, options = { showMessageIfNew: true }) {
   const newSession = {
     tabId: tab.id,
     url: tab.url,
+    pageTitle: pageContent?.title || tab.title || "",
     domain,
     category: classification.category,
     source: classification.source,
-    startTime: Date.now(),
-    message
+    message,
+    accumulatedMs: 0,
+    lastStartedAt: Date.now(),
+    isActive: true,
+    createdAt: Date.now(),
+    backendSessionId: null
   };
+
+  newSession.backendSessionId = await startBackendSession(newSession);
 
   tabSessions[tab.id] = newSession;
 
-  await chrome.storage.local.set({
+  await saveData({
     tabSessions,
-    currentSession: newSession
+    currentSession: newSession,
+    totalTracking,
+    activeTabId
   });
 
-  if (options.showMessageIfNew) {
+  if (shouldShowMessage) {
     await showRoastOnPage(tab.id, message, classification.category);
   }
 
-  console.log("Nouvelle session créée :", newSession);
+  console.log("Nouvelle session :", newSession);
 }
 
 chrome.tabs.onActivated.addListener(async (activeInfo) => {
   try {
     const tab = await chrome.tabs.get(activeInfo.tabId);
-    await analyseCurrentTab(tab, { showMessageIfNew: false });
+    await analyseTab(tab, false);
   } catch (error) {
-    console.log("Erreur onActivated:", error);
+    console.log("Erreur onActivated :", error);
   }
 });
 
 chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
   if (changeInfo.status === "complete") {
     try {
-      await analyseCurrentTab(tab, { showMessageIfNew: true });
+      await analyseTab(tab, true);
     } catch (error) {
-      console.log("Erreur onUpdated:", error);
+      console.log("Erreur onUpdated :", error);
     }
   }
 });
 
 chrome.tabs.onRemoved.addListener(async (tabId) => {
-  const { tabSessions } = await getStoredData();
+  const data = await getStoredData();
+  const tabSessions = data.tabSessions;
 
   if (tabSessions[tabId]) {
+    const endedSession = pauseSession(tabSessions[tabId]);
+
+    await endBackendSession(endedSession);
+
     delete tabSessions[tabId];
 
-    await chrome.storage.local.set({
-      tabSessions
+    await saveData({
+      tabSessions,
+      activeTabId: data.activeTabId === tabId ? null : data.activeTabId
     });
   }
 });
