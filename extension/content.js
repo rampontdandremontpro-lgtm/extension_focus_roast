@@ -84,6 +84,10 @@ function tryShowCurrentSessionMessage() {
       return;
     }
 
+    if (session.shouldShowPopup === false) {
+      return;
+    }
+
     const currentDomain = window.location.hostname.replace("www.", "");
     const sessionKey = `${session.tabId}-${session.domain}-${session.createdAt}`;
 

@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, MoreThanOrEqual } from 'typeorm';
+import { MoreThanOrEqual, Repository } from 'typeorm';
 
 import { Category } from '../entities/category.entity';
 import { Site } from '../entities/site.entity';
@@ -86,11 +86,11 @@ export class SessionsService {
     };
   }
 
-  async getTodayStats() {
+  async findTodaySessions() {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    const sessions = await this.sessionRepository.find({
+    return this.sessionRepository.find({
       where: {
         createdAt: MoreThanOrEqual(today),
       },
@@ -99,23 +99,9 @@ export class SessionsService {
           category: true,
         },
       },
+      order: {
+        createdAt: 'DESC',
+      },
     });
-
-    const stats = {
-      Productif: 0,
-      Distraction: 0,
-      'E-commerce': 0,
-      Neutre: 0,
-    };
-
-    for (const session of sessions) {
-      const categoryName = session.site.category.name;
-
-      if (categoryName in stats) {
-        stats[categoryName as keyof typeof stats] += session.durationSeconds;
-      }
-    }
-
-    return stats;
   }
 }

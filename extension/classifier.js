@@ -55,6 +55,23 @@ export function classifySite(domain, url, pageContent = null) {
     }
   }
 
+  const searchEngines = [
+    "google.com",
+    "google.fr",
+    "bing.com",
+    "duckduckgo.com",
+    "yahoo.com",
+    "qwant.com",
+    "ecosia.org"
+  ];
+
+  if (searchEngines.some((site) => normalizedDomain.includes(site))) {
+    return {
+      category: "Neutre",
+      source: "search_engine"
+    };
+  }
+
   const urlKeywords = {
     Productif: ["docs", "learn", "course", "cours", "formation", "developer", "academy"],
     Distraction: ["video", "streaming", "reels", "shorts", "gaming", "music"],
@@ -145,7 +162,7 @@ export function getOpeningMessage(category) {
   }
 
   if (category === "E-commerce") {
-    return "Tu regarde juste ou tu achète ? ";
+    return "Tu regardes juste ou tu achètes ?";
   }
 
   return "Navigation tranquille 😌";

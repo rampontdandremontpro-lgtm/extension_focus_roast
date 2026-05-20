@@ -31,6 +31,14 @@ function isBrowserInternalPage(url) {
   );
 }
 
+function shouldShowPopup(domain, category, source) {
+  if (source === "search_engine") {
+    return false;
+  }
+
+  return true;
+}
+
 async function getPageContent(tabId) {
   try {
     return await chrome.tabs.sendMessage(tabId, {
@@ -186,6 +194,7 @@ async function analyseTab(tab, shouldShowMessage = true) {
     category: classification.category,
     source: classification.source,
     message,
+    shouldShowPopup: shouldShowPopup(domain, classification.category, classification.source),
     accumulatedMs: 0,
     lastStartedAt: Date.now(),
     isActive: true,
@@ -204,9 +213,9 @@ async function analyseTab(tab, shouldShowMessage = true) {
     activeTabId
   });
 
-  if (shouldShowMessage) {
-  await showRoastOnPage(tab.id, message, classification.category);
-}
+  if (shouldShowMessage && newSession.shouldShowPopup) {
+    await showRoastOnPage(tab.id, message, classification.category);
+  }
 
   console.log("Nouvelle session :", newSession);
 }
