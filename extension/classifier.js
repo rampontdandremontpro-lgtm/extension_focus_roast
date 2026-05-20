@@ -1,65 +1,19 @@
 export function getDomainFromUrl(url) {
   try {
     const urlObject = new URL(url);
-    return urlObject.hostname.replace("www.", "");
+    return urlObject.hostname.replace(/^www\./, "").toLowerCase();
   } catch (error) {
     return "site-inconnu";
   }
 }
 
+function domainMatches(domain, sites) {
+  return sites.some((site) => domain === site || domain.endsWith(`.${site}`));
+}
+
 export function classifySite(domain, url, pageContent = null) {
   const normalizedDomain = domain.toLowerCase();
   const normalizedUrl = url.toLowerCase();
-
-  const knownSites = {
-  Productif: [
-    "github.com",
-    "stackoverflow.com",
-    "developer.mozilla.org",
-    "openclassrooms.com",
-    "docs.google.com",
-    "notion.so",
-    "figma.com",
-    "dbdiagram.io"
-  ],
-  Distraction: [
-    "youtube.com",
-    "tiktok.com",
-    "instagram.com",
-    "netflix.com",
-    "twitch.tv",
-    "primevideo.com",
-    "disneyplus.com",
-    "spotify.com",
-    "kick.com"
-  ],
-  "E-commerce": [
-    "amazon.fr",
-    "amazon.com",
-    "shein.com",
-    "nike.com",
-    "laboutiqueofficielle.com",
-    "vinted.fr",
-    "zalando.fr",
-    "aliexpress.com",
-    "cdiscount.com",
-    "ikea.com",
-    "ikea.fr"
-  ],
-  Neutre: [
-    "mail.google.com",
-    "gmail.com"
-  ]
-};
-
-  for (const category in knownSites) {
-    if (knownSites[category].some((site) => normalizedDomain.includes(site))) {
-      return {
-        category,
-        source: "known_site"
-      };
-    }
-  }
 
   const searchEngines = [
     "google.com",
@@ -71,17 +25,165 @@ export function classifySite(domain, url, pageContent = null) {
     "ecosia.org"
   ];
 
-  if (searchEngines.some((site) => normalizedDomain.includes(site))) {
+  if (domainMatches(normalizedDomain, searchEngines)) {
     return {
       category: "Neutre",
       source: "search_engine"
     };
   }
 
+  const knownSites = {
+    Productif: [
+      "github.com",
+      "gitlab.com",
+      "stackoverflow.com",
+      "developer.mozilla.org",
+      "openclassrooms.com",
+      "w3schools.com",
+      "freecodecamp.org",
+      "docs.google.com",
+      "notion.so",
+      "figma.com",
+      "dbdiagram.io",
+      "trello.com",
+      "slack.com",
+      "chatgpt.com",
+      "openai.com"
+    ],
+
+    Distraction: [
+      "youtube.com",
+      "youtu.be",
+      "tiktok.com",
+      "instagram.com",
+      "facebook.com",
+      "x.com",
+      "twitter.com",
+      "snapchat.com",
+      "netflix.com",
+      "twitch.tv",
+      "primevideo.com",
+      "disneyplus.com",
+      "spotify.com",
+      "kick.com",
+      "reddit.com"
+    ],
+
+    "E-commerce": [
+      "amazon.fr",
+      "amazon.com",
+      "shein.com",
+      "nike.com",
+      "adidas.com",
+      "adidas.fr",
+      "puma.com",
+      "puma.fr",
+      "zalando.fr",
+      "zalando.com",
+      "vinted.fr",
+      "aliexpress.com",
+      "cdiscount.com",
+      "fnac.com",
+      "darty.com",
+      "boulanger.com",
+      "ikea.com",
+      "ikea.fr",
+      "zara.com",
+      "hm.com",
+      "decathlon.fr",
+      "decathlon.com",
+      "laredoute.fr",
+      "asos.com",
+      "laboutiqueofficielle.com",
+      "temu.com",
+      "ebay.com",
+      "ebay.fr",
+      "carrefour.fr",
+      "auchan.fr",
+      "leclercdrive.fr"
+    ],
+
+    Neutre: [
+      "mail.google.com",
+      "gmail.com",
+      "outlook.live.com",
+      "hotmail.com"
+    ]
+  };
+
+  for (const category in knownSites) {
+    if (domainMatches(normalizedDomain, knownSites[category])) {
+      return {
+        category,
+        source: "known_site"
+      };
+    }
+  }
+
+  const ecommerceDomainWords = [
+    "shop",
+    "store",
+    "boutique",
+    "market",
+    "outlet",
+    "shopping",
+    "fashion",
+    "sneakers",
+    "chaussures",
+    "mode",
+    "meubles",
+    "mobilier"
+  ];
+
+  if (ecommerceDomainWords.some((word) => normalizedDomain.includes(word))) {
+    return {
+      category: "E-commerce",
+      source: "domain_keyword"
+    };
+  }
+
   const urlKeywords = {
-    Productif: ["docs", "learn", "course", "cours", "formation", "developer", "academy"],
-    Distraction: ["video", "streaming", "reels", "shorts", "gaming", "music"],
-    "E-commerce": ["shop", "store", "boutique", "cart", "checkout", "panier", "produit", "promo"]
+    "E-commerce": [
+      "shop",
+      "store",
+      "boutique",
+      "cart",
+      "checkout",
+      "panier",
+      "produit",
+      "promo",
+      "soldes",
+      "livraison",
+      "commande",
+      "paiement",
+      "collection",
+      "sneakers",
+      "chaussures",
+      "meuble",
+      "mobilier"
+    ],
+
+    Productif: [
+      "docs",
+      "learn",
+      "course",
+      "cours",
+      "formation",
+      "developer",
+      "academy",
+      "tutorial",
+      "documentation"
+    ],
+
+    Distraction: [
+      "video",
+      "streaming",
+      "reels",
+      "shorts",
+      "gaming",
+      "music",
+      "playlist"
+    ]
   };
 
   for (const category in urlKeywords) {
@@ -103,29 +205,6 @@ export function classifySite(domain, url, pageContent = null) {
     `.toLowerCase();
 
     const contentKeywords = {
-      Productif: [
-        "cours",
-        "formation",
-        "apprendre",
-        "documentation",
-        "développeur",
-        "developer",
-        "exercice",
-        "leçon",
-        "certification",
-        "compétence"
-      ],
-      Distraction: [
-        "films",
-        "séries",
-        "series",
-        "streaming",
-        "regarder",
-        "playlist",
-        "musique",
-        "gaming",
-        "abonnez-vous"
-      ],
       "E-commerce": [
         "panier",
         "acheter",
@@ -138,7 +217,37 @@ export function classifySite(domain, url, pageContent = null) {
         "ajouter au panier",
         "chaussures",
         "vêtements",
-        "retour gratuit"
+        "meubles",
+        "mobilier",
+        "retour gratuit",
+        "mon compte",
+        "saisir le code postal",
+        "choisir un magasin"
+      ],
+
+      Productif: [
+        "documentation",
+        "cours",
+        "formation",
+        "apprendre",
+        "développeur",
+        "developer",
+        "exercice",
+        "leçon",
+        "certification",
+        "compétence"
+      ],
+
+      Distraction: [
+        "films",
+        "séries",
+        "series",
+        "streaming",
+        "regarder",
+        "playlist",
+        "musique",
+        "gaming",
+        "abonnez-vous"
       ]
     };
 

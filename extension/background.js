@@ -1,7 +1,6 @@
 import { getDomainFromUrl, classifySite, getOpeningMessage } from "./classifier.js";
 
 const API_BASE_URL = "http://localhost:3000";
-const POPUP_REPEAT_COOLDOWN_MS = 2500;
 
 const timedRoastMessages = {
   Distraction: [
@@ -79,7 +78,61 @@ async function showRoastOnPage(tabId, message, category) {
       category
     });
   } catch {
-    console.log("Message non affichable sur cette page.");
+    try {
+      await chrome.scripting.executeScript({
+        target: { tabId },
+        func: (text, roastCategory) => {
+          const existingPopup = document.getElementById("focus-roast-popup");
+
+          if (existingPopup) {
+            existingPopup.remove();
+          }
+
+          function getCategoryStyle(category) {
+            switch (category) {
+              case "Distraction":
+                return "linear-gradient(135deg, #CF1B1B, #ED6D2D)";
+              case "E-commerce":
+                return "linear-gradient(135deg, #ED6D2D, #F19430)";
+              case "Productif":
+                return "linear-gradient(135deg, #E2E241, #FBE15F)";
+              default:
+                return "linear-gradient(135deg, #555, #777)";
+            }
+          }
+
+          const popup = document.createElement("div");
+          popup.id = "focus-roast-popup";
+          popup.innerText = text;
+
+          popup.style.position = "fixed";
+          popup.style.top = "22px";
+          popup.style.left = "50%";
+          popup.style.transform = "translateX(-50%)";
+          popup.style.background = getCategoryStyle(roastCategory);
+          popup.style.color = roastCategory === "Productif" ? "#000" : "#fff";
+          popup.style.padding = "14px 26px";
+          popup.style.borderRadius = "999px";
+          popup.style.zIndex = "2147483647";
+          popup.style.fontWeight = "bold";
+          popup.style.fontSize = "16px";
+          popup.style.boxShadow = "0 10px 30px rgba(0,0,0,0.45)";
+          popup.style.border = "1px solid rgba(255,255,255,0.25)";
+          popup.style.textAlign = "center";
+          popup.style.fontFamily = "Arial, sans-serif";
+          popup.style.pointerEvents = "none";
+
+          document.documentElement.appendChild(popup);
+
+          setTimeout(() => {
+            popup.remove();
+          }, 4500);
+        },
+        args: [message, category]
+      });
+    } catch {
+      console.log("Message non affichable sur cette page.");
+    }
   }
 }
 
@@ -119,26 +172,10 @@ function resumeSession(session) {
     return session;
   }
 
-  if (session.isActive) {
-    return session;
-  }
-
   return {
     ...session,
     lastStartedAt: Date.now(),
     isActive: true
-  };
-}
-
-function canShowRepeatPopup(session) {
-  const lastPopupShownAt = Number(session.lastPopupShownAt) || 0;
-  return Date.now() - lastPopupShownAt > POPUP_REPEAT_COOLDOWN_MS;
-}
-
-function markPopupShown(session) {
-  return {
-    ...session,
-    lastPopupShownAt: Date.now()
   };
 }
 
@@ -216,21 +253,25 @@ async function analyseTab(tab, shouldShowMessage = true) {
   activeTabId = tab.id;
 
   const domain = getDomainFromUrl(tab.url);
+  const pageContent = await getPageContent(tab.id);
+  const classification = classifySite(domain, tab.url, pageContent);
+  const openingMessage = getOpeningMessage(classification.category);
   const existingSession = tabSessions[tab.id];
 
   if (existingSession && existingSession.domain === domain) {
-    let resumedSession = resumeSession({
+    const categoryChanged =
+      existingSession.category !== classification.category ||
+      existingSession.source !== classification.source;
+
+    const resumedSession = resumeSession({
       ...existingSession,
       url: tab.url,
-      pageTitle: tab.title || existingSession.pageTitle
+      pageTitle: pageContent?.title || tab.title || existingSession.pageTitle,
+      category: classification.category,
+      source: classification.source,
+      message: categoryChanged ? openingMessage : existingSession.message || openingMessage,
+      shouldShowPopup: shouldShowPopup(domain, classification.category, classification.source)
     });
-
-    if (shouldShowMessage && resumedSession.shouldShowPopup && canShowRepeatPopup(resumedSession)) {
-      const messageToShow = resumedSession.message || getOpeningMessage(resumedSession.category);
-
-      await showRoastOnPage(tab.id, messageToShow, resumedSession.category);
-      resumedSession = markPopupShown(resumedSession);
-    }
 
     tabSessions[tab.id] = resumedSession;
 
@@ -243,6 +284,14 @@ async function analyseTab(tab, shouldShowMessage = true) {
 
     await syncBackendSession(resumedSession);
 
+    if (shouldShowMessage && resumedSession.shouldShowPopup) {
+      const messageToShow = categoryChanged
+        ? openingMessage
+        : resumedSession.message || openingMessage;
+
+      await showRoastOnPage(tab.id, messageToShow, resumedSession.category);
+    }
+
     console.log("Session reprise :", resumedSession);
     return;
   }
@@ -253,18 +302,14 @@ async function analyseTab(tab, shouldShowMessage = true) {
     await syncBackendSession(endedSession);
   }
 
-  const pageContent = await getPageContent(tab.id);
-  const classification = classifySite(domain, tab.url, pageContent);
-  const message = getOpeningMessage(classification.category);
-
-  let newSession = {
+  const newSession = {
     tabId: tab.id,
     url: tab.url,
     pageTitle: pageContent?.title || tab.title || "",
     domain,
     category: classification.category,
     source: classification.source,
-    message,
+    message: openingMessage,
     shouldShowPopup: shouldShowPopup(domain, classification.category, classification.source),
     accumulatedMs: 0,
     lastStartedAt: Date.now(),
@@ -276,11 +321,6 @@ async function analyseTab(tab, shouldShowMessage = true) {
 
   newSession.backendSessionId = await startBackendSession(newSession);
 
-  if (shouldShowMessage && newSession.shouldShowPopup) {
-    await showRoastOnPage(tab.id, message, classification.category);
-    newSession = markPopupShown(newSession);
-  }
-
   tabSessions[tab.id] = newSession;
 
   await saveData({
@@ -289,6 +329,10 @@ async function analyseTab(tab, shouldShowMessage = true) {
     totalTracking,
     activeTabId
   });
+
+  if (shouldShowMessage && newSession.shouldShowPopup) {
+    await showRoastOnPage(tab.id, openingMessage, classification.category);
+  }
 
   console.log("Nouvelle session :", newSession);
 }
@@ -322,8 +366,7 @@ async function checkTimedRoastMessages() {
       const updatedSession = {
         ...session,
         message: roast.message,
-        shownRoastTriggers,
-        lastPopupShownAt: Date.now()
+        shownRoastTriggers
       };
 
       tabSessions[activeTabId] = updatedSession;
