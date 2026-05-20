@@ -6,12 +6,11 @@ const sourceElement = document.getElementById("source");
 const messageElement = document.getElementById("message");
 const pageTimerElement = document.getElementById("pageTimer");
 const totalTimerElement = document.getElementById("totalTimer");
-const refreshBtn = document.getElementById("refreshBtn");
-
 const globalMessageElement = document.getElementById("globalMessage");
 const statsChartElement = document.getElementById("statsChart");
 
 let timerInterval = null;
+let statsInterval = null;
 let statsChart = null;
 
 function formatTime(milliseconds) {
@@ -23,6 +22,23 @@ function formatTime(milliseconds) {
   const seconds = String(totalSeconds % 60).padStart(2, "0");
 
   return `${hours}:${minutes}:${seconds}`;
+}
+
+function formatSecondsForChart(seconds) {
+  const safeSeconds = Number(seconds) || 0;
+
+  if (safeSeconds < 60) {
+    return `${safeSeconds} sec`;
+  }
+
+  const minutes = Math.floor(safeSeconds / 60);
+  const remainingSeconds = safeSeconds % 60;
+
+  if (remainingSeconds === 0) {
+    return `${minutes} min`;
+  }
+
+  return `${minutes} min ${remainingSeconds} sec`;
 }
 
 function formatSource(source) {
@@ -72,7 +88,6 @@ async function loadCurrentSession() {
   ]);
 
   let session = result.currentSession;
-  const totalTracking = result.totalTracking;
 
   if (!session) {
     domainElement.textContent = "Aucun site détecté";
@@ -113,6 +128,15 @@ async function loadCurrentSession() {
     } else {
       totalTimerElement.textContent = "00:00:00";
     }
+
+    if (session) {
+      domainElement.textContent = session.domain;
+      categoryElement.textContent = session.category;
+      sourceElement.textContent = formatSource(session.source);
+      messageElement.textContent = session.message;
+      messageElement.style.background = getCategoryStyle(session.category);
+      messageElement.style.color = session.category === "Productif" ? "#000" : "#fff";
+    }
   }, 1000);
 }
 
@@ -126,46 +150,24 @@ async function loadTodayStats() {
 
     const stats = await response.json();
 
-    const storage = await chrome.storage.local.get(["currentSession"]);
-    const activeSession = storage.currentSession;
-
-    const valuesByCategory = {
-      Productif: stats.Productif || 0,
-      Distraction: stats.Distraction || 0,
-      "E-commerce": stats["E-commerce"] || 0,
-      Neutre: stats.Neutre || 0
-    };
-
-    if (activeSession?.isActive) {
-      const activeSeconds = Math.floor(getCurrentElapsed(activeSession) / 1000);
-
-      if (activeSession.category in valuesByCategory) {
-        valuesByCategory[activeSession.category] += activeSeconds;
-      }
-    }
-
     const values = [
-      valuesByCategory.Productif,
-      valuesByCategory.Distraction,
-      valuesByCategory["E-commerce"],
-      valuesByCategory.Neutre
+      stats.Productif || 0,
+      stats.Distraction || 0,
+      stats["E-commerce"] || 0,
+      stats.Neutre || 0
     ];
 
     const totalSeconds = values.reduce((total, value) => total + value, 0);
 
-    if (globalMessageElement) {
-      globalMessageElement.textContent =
-        stats.globalMessage || "Stats chargées.";
-    }
+    globalMessageElement.textContent =
+      stats.globalMessage || "Stats chargées.";
 
     if (totalSeconds === 0) {
-      if (globalMessageElement) {
-        globalMessageElement.textContent = "Aucune session enregistrée aujourd’hui.";
-      }
+      globalMessageElement.textContent = "Aucune session enregistrée aujourd’hui.";
 
       if (statsChart) {
-        statsChart.destroy();
-        statsChart = null;
+        statsChart.data.datasets[0].data = [0, 0, 0, 0];
+        statsChart.update();
       }
 
       return;
@@ -200,8 +202,8 @@ async function loadTodayStats() {
                 label: function (context) {
                   const label = context.label || "";
                   const seconds = context.raw || 0;
-                  const minutes = Math.round(seconds / 60);
-                  return `${label} : ${minutes} min`;
+
+                  return `${label} : ${formatSecondsForChart(seconds)}`;
                 }
               }
             }
@@ -214,25 +216,13 @@ async function loadTodayStats() {
     }
   } catch (error) {
     console.log("Erreur chargement stats :", error);
-
-    if (globalMessageElement) {
-      globalMessageElement.textContent = "Impossible de charger les stats.";
-    }
+    globalMessageElement.textContent = "Impossible de charger les stats.";
   }
 }
-
-refreshBtn.addEventListener("click", async () => {
-  await chrome.runtime.sendMessage({
-    type: "RESET_CURRENT_PAGE_TIMER"
-  });
-
-  await loadCurrentSession();
-  await loadTodayStats();
-});
 
 loadCurrentSession();
 loadTodayStats();
 
-setInterval(() => {
+statsInterval = setInterval(() => {
   loadTodayStats();
 }, 1000);

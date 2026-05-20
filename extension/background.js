@@ -53,11 +53,7 @@ function isBrowserInternalPage(url) {
 }
 
 function shouldShowPopup(domain, category, source) {
-  if (source === "search_engine") {
-    return false;
-  }
-
-  return true;
+  return source !== "search_engine";
 }
 
 async function getPageContent(tabId) {
@@ -84,28 +80,7 @@ async function showRoastOnPage(tabId, message, category) {
   }, 800);
 }
 
-function pauseSession(session) {
-  if (!session || !session.isActive) {
-    return session;
-  }
-
-  return {
-    ...session,
-    accumulatedMs: session.accumulatedMs + (Date.now() - session.lastStartedAt),
-    lastStartedAt: null,
-    isActive: false
-  };
-}
-
-function resumeSession(session) {
-  return {
-    ...session,
-    lastStartedAt: Date.now(),
-    isActive: true
-  };
-}
-
-function getSessionElapsedSeconds(session) {
+function getSessionElapsedMs(session) {
   if (!session) {
     return 0;
   }
@@ -116,7 +91,40 @@ function getSessionElapsedSeconds(session) {
     elapsedMs += Date.now() - session.lastStartedAt;
   }
 
-  return Math.floor(elapsedMs / 1000);
+  return elapsedMs;
+}
+
+function getSessionElapsedSeconds(session) {
+  return Math.floor(getSessionElapsedMs(session) / 1000);
+}
+
+function pauseSession(session) {
+  if (!session || !session.isActive) {
+    return session;
+  }
+
+  return {
+    ...session,
+    accumulatedMs: getSessionElapsedMs(session),
+    lastStartedAt: null,
+    isActive: false
+  };
+}
+
+function resumeSession(session) {
+  if (!session) {
+    return session;
+  }
+
+  if (session.isActive) {
+    return session;
+  }
+
+  return {
+    ...session,
+    lastStartedAt: Date.now(),
+    isActive: true
+  };
 }
 
 async function startBackendSession(session) {
@@ -149,7 +157,7 @@ async function startBackendSession(session) {
   }
 }
 
-async function endBackendSession(session) {
+async function syncBackendSession(session) {
   if (!session || !session.backendSessionId) {
     return;
   }
@@ -162,11 +170,11 @@ async function endBackendSession(session) {
       },
       body: JSON.stringify({
         sessionId: session.backendSessionId,
-        durationSeconds: Math.floor(session.accumulatedMs / 1000)
+        durationSeconds: getSessionElapsedSeconds(session)
       })
     });
   } catch {
-    console.log("Backend indisponible pour /sessions/end.");
+    console.log("Backend indisponible pour sync session.");
   }
 }
 
@@ -185,7 +193,9 @@ async function analyseTab(tab, shouldShowMessage = true) {
   }
 
   if (activeTabId && activeTabId !== tab.id && tabSessions[activeTabId]) {
-    tabSessions[activeTabId] = pauseSession(tabSessions[activeTabId]);
+    const oldSession = pauseSession(tabSessions[activeTabId]);
+    tabSessions[activeTabId] = oldSession;
+    await syncBackendSession(oldSession);
   }
 
   activeTabId = tab.id;
@@ -196,7 +206,8 @@ async function analyseTab(tab, shouldShowMessage = true) {
   if (existingSession && existingSession.domain === domain) {
     const resumedSession = resumeSession({
       ...existingSession,
-      url: tab.url
+      url: tab.url,
+      pageTitle: tab.title || existingSession.pageTitle
     });
 
     tabSessions[tab.id] = resumedSession;
@@ -208,13 +219,16 @@ async function analyseTab(tab, shouldShowMessage = true) {
       activeTabId
     });
 
+    await syncBackendSession(resumedSession);
+
     console.log("Session reprise :", resumedSession);
     return;
   }
 
   if (existingSession && existingSession.domain !== domain) {
     const endedSession = pauseSession(existingSession);
-    await endBackendSession(endedSession);
+    tabSessions[tab.id] = endedSession;
+    await syncBackendSession(endedSession);
   }
 
   const pageContent = await getPageContent(tab.id);
@@ -273,7 +287,6 @@ async function checkTimedRoastMessages() {
 
   const messages = timedRoastMessages[session.category] || [];
   const elapsedSeconds = getSessionElapsedSeconds(session);
-
   const shownRoastTriggers = session.shownRoastTriggers || [];
 
   for (const roast of messages) {
@@ -299,7 +312,7 @@ async function checkTimedRoastMessages() {
   }
 }
 
-async function resetCurrentPageTimer() {
+async function syncActiveSessionToBackend() {
   const data = await getStoredData();
   const tabSessions = data.tabSessions;
   const activeTabId = data.activeTabId;
@@ -310,21 +323,11 @@ async function resetCurrentPageTimer() {
 
   const session = tabSessions[activeTabId];
 
-  const resetSession = {
-    ...session,
-    accumulatedMs: 0,
-    lastStartedAt: Date.now(),
-    isActive: true,
-    shownRoastTriggers: [],
-    message: getOpeningMessage(session.category)
-  };
+  if (!session.isActive) {
+    return;
+  }
 
-  tabSessions[activeTabId] = resetSession;
-
-  await saveData({
-    tabSessions,
-    currentSession: resetSession
-  });
+  await syncBackendSession(session);
 }
 
 chrome.tabs.onActivated.addListener(async (activeInfo) => {
@@ -353,7 +356,7 @@ chrome.tabs.onRemoved.addListener(async (tabId) => {
   if (tabSessions[tabId]) {
     const endedSession = pauseSession(tabSessions[tabId]);
 
-    await endBackendSession(endedSession);
+    await syncBackendSession(endedSession);
 
     delete tabSessions[tabId];
 
@@ -378,16 +381,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     return true;
   }
-
-  if (message.type === "RESET_CURRENT_PAGE_TIMER") {
-    resetCurrentPageTimer().then(() => {
-      sendResponse({ success: true });
-    });
-
-    return true;
-  }
 });
 
 setInterval(() => {
   checkTimedRoastMessages();
 }, 1000);
+
+setInterval(() => {
+  syncActiveSessionToBackend();
+}, 2000);
