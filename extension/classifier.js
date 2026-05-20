@@ -12,39 +12,43 @@ export function classifySite(domain, url, pageContent = null) {
   const normalizedUrl = url.toLowerCase();
 
   const knownSites = {
-    Productif: [
-      "github.com",
-      "stackoverflow.com",
-      "developer.mozilla.org",
-      "openclassrooms.com",
-      "docs.google.com",
-      "notion.so",
-      "figma.com",
-      "dbdiagram.io"
-    ],
-    Distraction: [
-      "youtube.com",
-      "tiktok.com",
-      "instagram.com",
-      "netflix.com",
-      "twitch.tv",
-      "primevideo.com",
-      "disneyplus.com",
-      "spotify.com",
-      "kick.com"
-    ],
-    "E-commerce": [
-      "amazon.fr",
-      "amazon.com",
-      "shein.com",
-      "nike.com",
-      "laboutiqueofficielle.com",
-      "vinted.fr",
-      "zalando.fr",
-      "aliexpress.com",
-      "cdiscount.com"
-    ]
-  };
+  Productif: [
+    "github.com",
+    "stackoverflow.com",
+    "developer.mozilla.org",
+    "openclassrooms.com",
+    "docs.google.com",
+    "notion.so",
+    "figma.com",
+    "dbdiagram.io"
+  ],
+  Distraction: [
+    "youtube.com",
+    "tiktok.com",
+    "instagram.com",
+    "netflix.com",
+    "twitch.tv",
+    "primevideo.com",
+    "disneyplus.com",
+    "spotify.com",
+    "kick.com"
+  ],
+  "E-commerce": [
+    "amazon.fr",
+    "amazon.com",
+    "shein.com",
+    "nike.com",
+    "laboutiqueofficielle.com",
+    "vinted.fr",
+    "zalando.fr",
+    "aliexpress.com",
+    "cdiscount.com"
+  ],
+  Neutre: [
+    "mail.google.com",
+    "gmail.com"
+  ]
+};
 
   for (const category in knownSites) {
     if (knownSites[category].some((site) => normalizedDomain.includes(site))) {
