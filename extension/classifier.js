@@ -42,7 +42,9 @@ export function classifySite(domain, url, pageContent = null) {
     "vinted.fr",
     "zalando.fr",
     "aliexpress.com",
-    "cdiscount.com"
+    "cdiscount.com",
+    "ikea.com",
+    "ikea.fr"
   ],
   Neutre: [
     "mail.google.com",

@@ -1,6 +1,7 @@
 import { getDomainFromUrl, classifySite, getOpeningMessage } from "./classifier.js";
 
 const API_BASE_URL = "http://localhost:3000";
+const POPUP_REPEAT_COOLDOWN_MS = 2500;
 
 const timedRoastMessages = {
   Distraction: [
@@ -67,6 +68,10 @@ async function getPageContent(tabId) {
 }
 
 async function showRoastOnPage(tabId, message, category) {
+  if (!message) {
+    return;
+  }
+
   try {
     await chrome.tabs.sendMessage(tabId, {
       type: "SHOW_ROAST",
@@ -114,10 +119,26 @@ function resumeSession(session) {
     return session;
   }
 
+  if (session.isActive) {
+    return session;
+  }
+
   return {
     ...session,
     lastStartedAt: Date.now(),
     isActive: true
+  };
+}
+
+function canShowRepeatPopup(session) {
+  const lastPopupShownAt = Number(session.lastPopupShownAt) || 0;
+  return Date.now() - lastPopupShownAt > POPUP_REPEAT_COOLDOWN_MS;
+}
+
+function markPopupShown(session) {
+  return {
+    ...session,
+    lastPopupShownAt: Date.now()
   };
 }
 
@@ -198,11 +219,18 @@ async function analyseTab(tab, shouldShowMessage = true) {
   const existingSession = tabSessions[tab.id];
 
   if (existingSession && existingSession.domain === domain) {
-    const resumedSession = resumeSession({
+    let resumedSession = resumeSession({
       ...existingSession,
       url: tab.url,
       pageTitle: tab.title || existingSession.pageTitle
     });
+
+    if (shouldShowMessage && resumedSession.shouldShowPopup && canShowRepeatPopup(resumedSession)) {
+      const messageToShow = resumedSession.message || getOpeningMessage(resumedSession.category);
+
+      await showRoastOnPage(tab.id, messageToShow, resumedSession.category);
+      resumedSession = markPopupShown(resumedSession);
+    }
 
     tabSessions[tab.id] = resumedSession;
 
@@ -214,10 +242,6 @@ async function analyseTab(tab, shouldShowMessage = true) {
     });
 
     await syncBackendSession(resumedSession);
-
-    if (shouldShowMessage && resumedSession.shouldShowPopup) {
-      await showRoastOnPage(tab.id, resumedSession.message, resumedSession.category);
-    }
 
     console.log("Session reprise :", resumedSession);
     return;
@@ -233,7 +257,7 @@ async function analyseTab(tab, shouldShowMessage = true) {
   const classification = classifySite(domain, tab.url, pageContent);
   const message = getOpeningMessage(classification.category);
 
-  const newSession = {
+  let newSession = {
     tabId: tab.id,
     url: tab.url,
     pageTitle: pageContent?.title || tab.title || "",
@@ -252,6 +276,11 @@ async function analyseTab(tab, shouldShowMessage = true) {
 
   newSession.backendSessionId = await startBackendSession(newSession);
 
+  if (shouldShowMessage && newSession.shouldShowPopup) {
+    await showRoastOnPage(tab.id, message, classification.category);
+    newSession = markPopupShown(newSession);
+  }
+
   tabSessions[tab.id] = newSession;
 
   await saveData({
@@ -260,10 +289,6 @@ async function analyseTab(tab, shouldShowMessage = true) {
     totalTracking,
     activeTabId
   });
-
-  if (shouldShowMessage && newSession.shouldShowPopup) {
-    await showRoastOnPage(tab.id, message, classification.category);
-  }
 
   console.log("Nouvelle session :", newSession);
 }
@@ -294,17 +319,21 @@ async function checkTimedRoastMessages() {
     ) {
       shownRoastTriggers.push(roast.seconds);
 
-      session.message = roast.message;
-      session.shownRoastTriggers = shownRoastTriggers;
+      const updatedSession = {
+        ...session,
+        message: roast.message,
+        shownRoastTriggers,
+        lastPopupShownAt: Date.now()
+      };
 
-      tabSessions[activeTabId] = session;
+      tabSessions[activeTabId] = updatedSession;
 
       await saveData({
         tabSessions,
-        currentSession: session
+        currentSession: updatedSession
       });
 
-      await showRoastOnPage(activeTabId, roast.message, session.category);
+      await showRoastOnPage(activeTabId, roast.message, updatedSession.category);
       break;
     }
   }
@@ -331,7 +360,6 @@ async function syncActiveSessionToBackend() {
 chrome.tabs.onActivated.addListener(async (activeInfo) => {
   try {
     const tab = await chrome.tabs.get(activeInfo.tabId);
-
     await analyseTab(tab, true);
   } catch (error) {
     console.log("Erreur onActivated :", error);
@@ -363,6 +391,23 @@ chrome.tabs.onRemoved.addListener(async (tabId) => {
       tabSessions,
       activeTabId: data.activeTabId === tabId ? null : data.activeTabId
     });
+  }
+});
+
+chrome.windows.onFocusChanged.addListener(async (windowId) => {
+  if (windowId === chrome.windows.WINDOW_ID_NONE) {
+    return;
+  }
+
+  try {
+    const tabs = await chrome.tabs.query({ active: true, windowId });
+    const tab = tabs[0];
+
+    if (tab) {
+      await analyseTab(tab, true);
+    }
+  } catch (error) {
+    console.log("Erreur onFocusChanged :", error);
   }
 });
 
