@@ -67,17 +67,15 @@ async function getPageContent(tabId) {
 }
 
 async function showRoastOnPage(tabId, message, category) {
-  setTimeout(async () => {
-    try {
-      await chrome.tabs.sendMessage(tabId, {
-        type: "SHOW_ROAST",
-        text: message,
-        category
-      });
-    } catch {
-      console.log("Message non affichable sur cette page.");
-    }
-  }, 800);
+  try {
+    await chrome.tabs.sendMessage(tabId, {
+      type: "SHOW_ROAST",
+      text: message,
+      category
+    });
+  } catch {
+    console.log("Message non affichable sur cette page.");
+  }
 }
 
 function getSessionElapsedMs(session) {
@@ -113,10 +111,6 @@ function pauseSession(session) {
 
 function resumeSession(session) {
   if (!session) {
-    return session;
-  }
-
-  if (session.isActive) {
     return session;
   }
 
@@ -220,6 +214,10 @@ async function analyseTab(tab, shouldShowMessage = true) {
     });
 
     await syncBackendSession(resumedSession);
+
+    if (shouldShowMessage && resumedSession.shouldShowPopup) {
+      await showRoastOnPage(tab.id, resumedSession.message, resumedSession.category);
+    }
 
     console.log("Session reprise :", resumedSession);
     return;
@@ -333,7 +331,8 @@ async function syncActiveSessionToBackend() {
 chrome.tabs.onActivated.addListener(async (activeInfo) => {
   try {
     const tab = await chrome.tabs.get(activeInfo.tabId);
-    await analyseTab(tab, false);
+
+    await analyseTab(tab, true);
   } catch (error) {
     console.log("Erreur onActivated :", error);
   }
