@@ -1,5 +1,7 @@
 console.log("Focus Roast content.js chargé");
 
+let lastDisplayedSessionKey = null;
+
 function getPageContentForClassification() {
   const title = document.title || "";
 
@@ -35,7 +37,7 @@ function getCategoryStyle(category) {
     case "Productif":
       return "linear-gradient(135deg, #E2E241, #FBE15F)";
     default:
-      return "linear-gradient(135deg, #444, #666)";
+      return "linear-gradient(135deg, #555, #777)";
   }
 }
 
@@ -51,26 +53,54 @@ function showRoastMessage(message, category = "Neutre") {
   popup.innerText = message;
 
   popup.style.position = "fixed";
-  popup.style.top = "20px";
+  popup.style.top = "22px";
   popup.style.left = "50%";
   popup.style.transform = "translateX(-50%)";
   popup.style.background = getCategoryStyle(category);
-  popup.style.color = category === "Productif" ? "#000" : "white";
-  popup.style.padding = "14px 24px";
+  popup.style.color = category === "Productif" ? "#000" : "#fff";
+  popup.style.padding = "14px 26px";
   popup.style.borderRadius = "999px";
-  popup.style.zIndex = "999999";
+  popup.style.zIndex = "2147483647";
   popup.style.fontWeight = "bold";
   popup.style.fontSize = "16px";
-  popup.style.boxShadow = "0 10px 30px rgba(0,0,0,0.4)";
-  popup.style.border = "1px solid rgba(255,255,255,0.2)";
+  popup.style.boxShadow = "0 10px 30px rgba(0,0,0,0.45)";
+  popup.style.border = "1px solid rgba(255,255,255,0.25)";
   popup.style.textAlign = "center";
   popup.style.fontFamily = "Arial, sans-serif";
+  popup.style.pointerEvents = "none";
 
-  document.body.appendChild(popup);
+  document.documentElement.appendChild(popup);
 
   setTimeout(() => {
     popup.remove();
-  }, 4000);
+  }, 4500);
+}
+
+function tryShowCurrentSessionMessage() {
+  chrome.storage.local.get("currentSession", (result) => {
+    const session = result.currentSession;
+
+    if (!session || !session.message || !session.category) {
+      return;
+    }
+
+    const currentDomain = window.location.hostname.replace("www.", "");
+    const sessionKey = `${session.tabId}-${session.domain}-${session.createdAt}`;
+
+    if (!session.domain || !currentDomain.includes(session.domain)) {
+      return;
+    }
+
+    if (lastDisplayedSessionKey === sessionKey) {
+      return;
+    }
+
+    lastDisplayedSessionKey = sessionKey;
+
+    setTimeout(() => {
+      showRoastMessage(session.message, session.category);
+    }, 500);
+  });
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -85,3 +115,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 });
+
+chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName === "local" && changes.currentSession) {
+    tryShowCurrentSessionMessage();
+  }
+});
+
+tryShowCurrentSessionMessage();

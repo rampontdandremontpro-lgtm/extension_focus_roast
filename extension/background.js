@@ -205,8 +205,8 @@ async function analyseTab(tab, shouldShowMessage = true) {
   });
 
   if (shouldShowMessage) {
-    await showRoastOnPage(tab.id, message, classification.category);
-  }
+  await showRoastOnPage(tab.id, message, classification.category);
+}
 
   console.log("Nouvelle session :", newSession);
 }
@@ -245,5 +245,21 @@ chrome.tabs.onRemoved.addListener(async (tabId) => {
       tabSessions,
       activeTabId: data.activeTabId === tabId ? null : data.activeTabId
     });
+  }
+});
+
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.type === "FORCE_ANALYSE_ACTIVE_TAB") {
+    chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
+      const tab = tabs[0];
+
+      if (tab) {
+        await analyseTab(tab, true);
+      }
+
+      sendResponse({ success: true });
+    });
+
+    return true;
   }
 });

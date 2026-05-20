@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConfigModule } from '@nestjs/config';
 
 import { AppController } from './app.controller';
+import { SessionsModule } from './sessions/sessions.module';
 
 import { Category } from './entities/category.entity';
 import { Site } from './entities/site.entity';
@@ -24,6 +25,8 @@ import { Session } from './entities/session.entity';
       entities: [Category, Site, Session],
       synchronize: true,
     }),
+
+    SessionsModule,
   ],
   controllers: [AppController],
 })

@@ -9,7 +9,8 @@ const refreshBtn = document.getElementById("refreshBtn");
 let timerInterval = null;
 
 function formatTime(milliseconds) {
-  const totalSeconds = Math.floor(milliseconds / 1000);
+  const safeMilliseconds = Number(milliseconds) || 0;
+  const totalSeconds = Math.floor(safeMilliseconds / 1000);
 
   const hours = String(Math.floor(totalSeconds / 3600)).padStart(2, "0");
   const minutes = String(Math.floor((totalSeconds % 3600) / 60)).padStart(2, "0");
@@ -47,11 +48,14 @@ function getCurrentElapsed(session) {
     return 0;
   }
 
-  if (session.isActive && session.lastStartedAt) {
-    return session.accumulatedMs + (Date.now() - session.lastStartedAt);
+  const accumulatedMs = Number(session.accumulatedMs) || 0;
+  const lastStartedAt = Number(session.lastStartedAt) || null;
+
+  if (session.isActive && lastStartedAt) {
+    return accumulatedMs + (Date.now() - lastStartedAt);
   }
 
-  return session.accumulatedMs || 0;
+  return accumulatedMs;
 }
 
 async function loadCurrentSession() {
@@ -99,10 +103,18 @@ async function loadCurrentSession() {
       totalTimerElement.textContent = formatTime(
         Date.now() - freshData.totalTracking.startTime
       );
+    } else {
+      totalTimerElement.textContent = "00:00:00";
     }
   }, 1000);
 }
 
-refreshBtn.addEventListener("click", loadCurrentSession);
+refreshBtn.addEventListener("click", async () => {
+  await chrome.runtime.sendMessage({
+    type: "FORCE_ANALYSE_ACTIVE_TAB"
+  });
+
+  await loadCurrentSession();
+});
 
 loadCurrentSession();
