@@ -24,7 +24,8 @@ function formatSource(source) {
     known_site: "Site connu",
     url_keyword: "Mot-clé URL",
     page_content: "Contenu page",
-    neutral: "Neutre"
+    neutral: "Neutre",
+    search_engine: "Moteur de recherche"
   };
 
   return labels[source] || source;
@@ -111,7 +112,7 @@ async function loadCurrentSession() {
 
 refreshBtn.addEventListener("click", async () => {
   await chrome.runtime.sendMessage({
-    type: "FORCE_ANALYSE_ACTIVE_TAB"
+    type: "RESET_CURRENT_PAGE_TIMER"
   });
 
   await loadCurrentSession();

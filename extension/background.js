@@ -70,7 +70,7 @@ function pauseSession(session) {
 
   return {
     ...session,
-    accumulatedMs: session.accumulatedMs + (Date.now() - session.lastStartedAt),
+    accumulatedMs: Number(session.accumulatedMs || 0) + (Date.now() - Number(session.lastStartedAt || Date.now())),
     lastStartedAt: null,
     isActive: false
   };
@@ -106,7 +106,6 @@ async function startBackendSession(session) {
     }
 
     const data = await response.json();
-
     return data.sessionId || data.id || null;
   } catch {
     console.log("Backend indisponible pour /sessions/start.");
@@ -127,7 +126,7 @@ async function endBackendSession(session) {
       },
       body: JSON.stringify({
         sessionId: session.backendSessionId,
-        durationSeconds: Math.floor(session.accumulatedMs / 1000)
+        durationSeconds: Math.floor(Number(session.accumulatedMs || 0) / 1000)
       })
     });
   } catch {
@@ -266,6 +265,45 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         await analyseTab(tab, true);
       }
 
+      sendResponse({ success: true });
+    });
+
+    return true;
+  }
+
+  if (message.type === "RESET_CURRENT_PAGE_TIMER") {
+    chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
+      const tab = tabs[0];
+
+      if (!tab) {
+        sendResponse({ success: false });
+        return;
+      }
+
+      const data = await getStoredData();
+      const tabSessions = data.tabSessions;
+      const session = tabSessions[tab.id];
+
+      if (session) {
+        const resetSession = {
+          ...session,
+          accumulatedMs: 0,
+          lastStartedAt: Date.now(),
+          isActive: true
+        };
+
+        tabSessions[tab.id] = resetSession;
+
+        await saveData({
+          tabSessions,
+          currentSession: resetSession
+        });
+
+        sendResponse({ success: true });
+        return;
+      }
+
+      await analyseTab(tab, true);
       sendResponse({ success: true });
     });
 
