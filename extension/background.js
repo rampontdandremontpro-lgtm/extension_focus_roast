@@ -2,6 +2,27 @@ import { getDomainFromUrl, classifySite, getOpeningMessage } from "./classifier.
 
 const API_BASE_URL = "http://localhost:3000";
 
+const timedRoastMessages = {
+  Distraction: [
+    { seconds: 1800, message: "Je te surveille 👀" },
+    { seconds: 5400, message: "Ça fait long là" },
+    { seconds: 10800, message: "Mais fais autre chose de ta vie non ?" }
+  ],
+  Productif: [
+    { seconds: 0, message: "Enfin tu bosses 👏" },
+    { seconds: 1800, message: "Je suis fier de toi continue" },
+    { seconds: 7200, message: "Tu as mérité une pause champion" }
+  ],
+  "E-commerce": [
+    { seconds: 300, message: "Tu regardes juste ou tu achètes ?" },
+    { seconds: 1800, message: "Tu as acheté un truc au moins ?" },
+    { seconds: 3600, message: "Bon, soit t’achètes soit tu fermes" }
+  ],
+  Neutre: [
+    { seconds: 1800, message: "Toujours là ? Bon, ok." }
+  ]
+};
+
 async function getStoredData() {
   const data = await chrome.storage.local.get([
     "tabSessions",
@@ -70,7 +91,7 @@ function pauseSession(session) {
 
   return {
     ...session,
-    accumulatedMs: Number(session.accumulatedMs || 0) + (Date.now() - Number(session.lastStartedAt || Date.now())),
+    accumulatedMs: session.accumulatedMs + (Date.now() - session.lastStartedAt),
     lastStartedAt: null,
     isActive: false
   };
@@ -82,6 +103,20 @@ function resumeSession(session) {
     lastStartedAt: Date.now(),
     isActive: true
   };
+}
+
+function getSessionElapsedSeconds(session) {
+  if (!session) {
+    return 0;
+  }
+
+  let elapsedMs = Number(session.accumulatedMs) || 0;
+
+  if (session.isActive && session.lastStartedAt) {
+    elapsedMs += Date.now() - session.lastStartedAt;
+  }
+
+  return Math.floor(elapsedMs / 1000);
 }
 
 async function startBackendSession(session) {
@@ -106,6 +141,7 @@ async function startBackendSession(session) {
     }
 
     const data = await response.json();
+
     return data.sessionId || data.id || null;
   } catch {
     console.log("Backend indisponible pour /sessions/start.");
@@ -126,7 +162,7 @@ async function endBackendSession(session) {
       },
       body: JSON.stringify({
         sessionId: session.backendSessionId,
-        durationSeconds: Math.floor(Number(session.accumulatedMs || 0) / 1000)
+        durationSeconds: Math.floor(session.accumulatedMs / 1000)
       })
     });
   } catch {
@@ -198,7 +234,8 @@ async function analyseTab(tab, shouldShowMessage = true) {
     lastStartedAt: Date.now(),
     isActive: true,
     createdAt: Date.now(),
-    backendSessionId: null
+    backendSessionId: null,
+    shownRoastTriggers: []
   };
 
   newSession.backendSessionId = await startBackendSession(newSession);
@@ -217,6 +254,77 @@ async function analyseTab(tab, shouldShowMessage = true) {
   }
 
   console.log("Nouvelle session :", newSession);
+}
+
+async function checkTimedRoastMessages() {
+  const data = await getStoredData();
+  const tabSessions = data.tabSessions;
+  const activeTabId = data.activeTabId;
+
+  if (!activeTabId || !tabSessions[activeTabId]) {
+    return;
+  }
+
+  const session = tabSessions[activeTabId];
+
+  if (!session.isActive || session.shouldShowPopup === false) {
+    return;
+  }
+
+  const messages = timedRoastMessages[session.category] || [];
+  const elapsedSeconds = getSessionElapsedSeconds(session);
+
+  const shownRoastTriggers = session.shownRoastTriggers || [];
+
+  for (const roast of messages) {
+    if (
+      elapsedSeconds >= roast.seconds &&
+      !shownRoastTriggers.includes(roast.seconds)
+    ) {
+      shownRoastTriggers.push(roast.seconds);
+
+      session.message = roast.message;
+      session.shownRoastTriggers = shownRoastTriggers;
+
+      tabSessions[activeTabId] = session;
+
+      await saveData({
+        tabSessions,
+        currentSession: session
+      });
+
+      await showRoastOnPage(activeTabId, roast.message, session.category);
+      break;
+    }
+  }
+}
+
+async function resetCurrentPageTimer() {
+  const data = await getStoredData();
+  const tabSessions = data.tabSessions;
+  const activeTabId = data.activeTabId;
+
+  if (!activeTabId || !tabSessions[activeTabId]) {
+    return;
+  }
+
+  const session = tabSessions[activeTabId];
+
+  const resetSession = {
+    ...session,
+    accumulatedMs: 0,
+    lastStartedAt: Date.now(),
+    isActive: true,
+    shownRoastTriggers: [],
+    message: getOpeningMessage(session.category)
+  };
+
+  tabSessions[activeTabId] = resetSession;
+
+  await saveData({
+    tabSessions,
+    currentSession: resetSession
+  });
 }
 
 chrome.tabs.onActivated.addListener(async (activeInfo) => {
@@ -272,41 +380,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.type === "RESET_CURRENT_PAGE_TIMER") {
-    chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
-      const tab = tabs[0];
-
-      if (!tab) {
-        sendResponse({ success: false });
-        return;
-      }
-
-      const data = await getStoredData();
-      const tabSessions = data.tabSessions;
-      const session = tabSessions[tab.id];
-
-      if (session) {
-        const resetSession = {
-          ...session,
-          accumulatedMs: 0,
-          lastStartedAt: Date.now(),
-          isActive: true
-        };
-
-        tabSessions[tab.id] = resetSession;
-
-        await saveData({
-          tabSessions,
-          currentSession: resetSession
-        });
-
-        sendResponse({ success: true });
-        return;
-      }
-
-      await analyseTab(tab, true);
+    resetCurrentPageTimer().then(() => {
       sendResponse({ success: true });
     });
 
     return true;
   }
 });
+
+setInterval(() => {
+  checkTimedRoastMessages();
+}, 1000);

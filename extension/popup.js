@@ -1,3 +1,5 @@
+const API_BASE_URL = "http://localhost:3000";
+
 const domainElement = document.getElementById("domain");
 const categoryElement = document.getElementById("category");
 const sourceElement = document.getElementById("source");
@@ -32,7 +34,7 @@ function formatSource(source) {
     search_engine: "Moteur de recherche"
   };
 
-  return labels[source] || source;
+  return labels[source] || source || "Inconnue";
 }
 
 function getCategoryStyle(category) {
@@ -116,7 +118,7 @@ async function loadCurrentSession() {
 
 async function loadTodayStats() {
   try {
-    const response = await fetch("http://localhost:3000/stats/today");
+    const response = await fetch(`${API_BASE_URL}/stats/today`);
 
     if (!response.ok) {
       throw new Error("Erreur API stats");
@@ -124,20 +126,42 @@ async function loadTodayStats() {
 
     const stats = await response.json();
 
-    globalMessageElement.textContent =
-      stats.globalMessage || "Stats chargées.";
+    const storage = await chrome.storage.local.get(["currentSession"]);
+    const activeSession = storage.currentSession;
+
+    const valuesByCategory = {
+      Productif: stats.Productif || 0,
+      Distraction: stats.Distraction || 0,
+      "E-commerce": stats["E-commerce"] || 0,
+      Neutre: stats.Neutre || 0
+    };
+
+    if (activeSession?.isActive) {
+      const activeSeconds = Math.floor(getCurrentElapsed(activeSession) / 1000);
+
+      if (activeSession.category in valuesByCategory) {
+        valuesByCategory[activeSession.category] += activeSeconds;
+      }
+    }
 
     const values = [
-      stats.Productif || 0,
-      stats.Distraction || 0,
-      stats["E-commerce"] || 0,
-      stats.Neutre || 0
+      valuesByCategory.Productif,
+      valuesByCategory.Distraction,
+      valuesByCategory["E-commerce"],
+      valuesByCategory.Neutre
     ];
 
     const totalSeconds = values.reduce((total, value) => total + value, 0);
 
+    if (globalMessageElement) {
+      globalMessageElement.textContent =
+        stats.globalMessage || "Stats chargées.";
+    }
+
     if (totalSeconds === 0) {
-      globalMessageElement.textContent = "Aucune session enregistrée aujourd’hui.";
+      if (globalMessageElement) {
+        globalMessageElement.textContent = "Aucune session enregistrée aujourd’hui.";
+      }
 
       if (statsChart) {
         statsChart.destroy();
@@ -147,48 +171,53 @@ async function loadTodayStats() {
       return;
     }
 
-    if (statsChart) {
-      statsChart.destroy();
-    }
-
-    statsChart = new Chart(statsChartElement, {
-      type: "doughnut",
-      data: {
-        labels: ["Productif", "Distraction", "E-commerce", "Neutre"],
-        datasets: [
-          {
-            data: values,
-            backgroundColor: ["#FBE15F", "#CF1B1B", "#ED6D2D", "#777777"],
-            borderColor: "#1f0f0f",
-            borderWidth: 2
-          }
-        ]
-      },
-      options: {
-        responsive: true,
-        plugins: {
-          legend: {
-            position: "bottom",
-            labels: {
-              color: "#ffffff"
+    if (!statsChart) {
+      statsChart = new Chart(statsChartElement, {
+        type: "doughnut",
+        data: {
+          labels: ["Productif", "Distraction", "E-commerce", "Neutre"],
+          datasets: [
+            {
+              data: values,
+              backgroundColor: ["#FBE15F", "#CF1B1B", "#ED6D2D", "#777777"],
+              borderColor: "#1f0f0f",
+              borderWidth: 2
             }
-          },
-          tooltip: {
-            callbacks: {
-              label: function (context) {
-                const label = context.label || "";
-                const seconds = context.raw || 0;
-                const minutes = Math.round(seconds / 60);
-                return `${label} : ${minutes} min`;
+          ]
+        },
+        options: {
+          responsive: true,
+          animation: false,
+          plugins: {
+            legend: {
+              position: "bottom",
+              labels: {
+                color: "#ffffff"
+              }
+            },
+            tooltip: {
+              callbacks: {
+                label: function (context) {
+                  const label = context.label || "";
+                  const seconds = context.raw || 0;
+                  const minutes = Math.round(seconds / 60);
+                  return `${label} : ${minutes} min`;
+                }
               }
             }
           }
         }
-      }
-    });
+      });
+    } else {
+      statsChart.data.datasets[0].data = values;
+      statsChart.update();
+    }
   } catch (error) {
     console.log("Erreur chargement stats :", error);
-    globalMessageElement.textContent = "Impossible de charger les stats.";
+
+    if (globalMessageElement) {
+      globalMessageElement.textContent = "Impossible de charger les stats.";
+    }
   }
 }
 
@@ -203,3 +232,7 @@ refreshBtn.addEventListener("click", async () => {
 
 loadCurrentSession();
 loadTodayStats();
+
+setInterval(() => {
+  loadTodayStats();
+}, 1000);
