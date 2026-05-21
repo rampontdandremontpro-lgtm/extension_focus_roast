@@ -2,40 +2,94 @@ import { getDomainFromUrl, classifySite, getOpeningMessage } from "./classifier.
 
 const API_BASE_URL = "http://localhost:3000";
 
+let suppressFocusUntil = 0;
+let suppressPopupMessageUntil = 0;
+let focusPauseTimeoutId = null;
+
 const timedRoastMessages = {
   Distraction: [
-    { seconds: 1800, message: "Je te surveille 👀" },
-    { seconds: 5400, message: "Ça fait long là" },
-    { seconds: 10800, message: "Mais fais autre chose de ta vie non ?" }
+    { seconds: 10, message: "Je te surveille 👀" },
+    { seconds: 20, message: "Ça fait long là" },
+    { seconds: 30, message: "Mais fais autre chose de ta vie non ?" }
   ],
   Productif: [
-    { seconds: 0, message: "Enfin tu bosses 👏" },
-    { seconds: 1800, message: "Je suis fier de toi continue" },
-    { seconds: 7200, message: "Tu as mérité une pause champion" }
+    { seconds: 10, message: "Je suis fier de toi continue" },
+    { seconds: 20, message: "Tu es lancé là 💪" },
+    { seconds: 30, message: "Tu as mérité une pause champion" }
   ],
   "E-commerce": [
-    { seconds: 300, message: "Tu regardes juste ou tu achètes ?" },
-    { seconds: 1800, message: "Tu as acheté un truc au moins ?" },
-    { seconds: 3600, message: "Bon, soit t’achètes soit tu fermes" }
+    { seconds: 10, message: "Tu as acheté un truc au moins ?" },
+    { seconds: 20, message: "Bon, soit t’achètes soit tu fermes" },
+    { seconds: 30, message: "Eh oh t’es toujours là ?" }
   ],
   Neutre: [
-    { seconds: 1800, message: "Toujours là ? Bon, ok." }
+    { seconds: 20, message: "Toujours là ? Bon, ok." },
+    { seconds: 30, message: "J'espère que c'est intéressant" }
   ]
 };
+
+async function initializeFreshTracking() {
+  const now = Date.now();
+
+  await chrome.storage.local.set({
+    tabSessions: {},
+    currentSession: null,
+    activeTabId: null,
+    totalTracking: {
+      startTime: now,
+      accumulatedMs: 0,
+      lastStartedAt: now,
+      isActive: true
+    },
+    trackingStartedAt: new Date(now).toISOString()
+  });
+
+  console.log("Tracking remis à zéro proprement.");
+}
+
+chrome.runtime.onStartup.addListener(async () => {
+  await initializeFreshTracking();
+});
+
+chrome.runtime.onInstalled.addListener(async () => {
+  await initializeFreshTracking();
+});
 
 async function getStoredData() {
   const data = await chrome.storage.local.get([
     "tabSessions",
     "currentSession",
     "totalTracking",
-    "activeTabId"
+    "activeTabId",
+    "trackingStartedAt"
   ]);
+
+  const now = Date.now();
+
+  if (!data.trackingStartedAt || !data.totalTracking) {
+    const freshData = {
+      tabSessions: {},
+      currentSession: null,
+      activeTabId: null,
+      totalTracking: {
+        startTime: now,
+        accumulatedMs: 0,
+        lastStartedAt: now,
+        isActive: true
+      },
+      trackingStartedAt: new Date(now).toISOString()
+    };
+
+    await chrome.storage.local.set(freshData);
+    return freshData;
+  }
 
   return {
     tabSessions: data.tabSessions || {},
     currentSession: data.currentSession || null,
-    totalTracking: data.totalTracking || { startTime: Date.now() },
-    activeTabId: data.activeTabId || null
+    totalTracking: data.totalTracking,
+    activeTabId: data.activeTabId || null,
+    trackingStartedAt: data.trackingStartedAt
   };
 }
 
@@ -67,9 +121,7 @@ async function getPageContent(tabId) {
 }
 
 async function showRoastOnPage(tabId, message, category) {
-  if (!message) {
-    return;
-  }
+  if (!message) return;
 
   try {
     await chrome.tabs.sendMessage(tabId, {
@@ -78,68 +130,12 @@ async function showRoastOnPage(tabId, message, category) {
       category
     });
   } catch {
-    try {
-      await chrome.scripting.executeScript({
-        target: { tabId },
-        func: (text, roastCategory) => {
-          const existingPopup = document.getElementById("focus-roast-popup");
-
-          if (existingPopup) {
-            existingPopup.remove();
-          }
-
-          function getCategoryStyle(category) {
-            switch (category) {
-              case "Distraction":
-                return "linear-gradient(135deg, #CF1B1B, #ED6D2D)";
-              case "E-commerce":
-                return "linear-gradient(135deg, #ED6D2D, #F19430)";
-              case "Productif":
-                return "linear-gradient(135deg, #E2E241, #FBE15F)";
-              default:
-                return "linear-gradient(135deg, #555, #777)";
-            }
-          }
-
-          const popup = document.createElement("div");
-          popup.id = "focus-roast-popup";
-          popup.innerText = text;
-
-          popup.style.position = "fixed";
-          popup.style.top = "22px";
-          popup.style.left = "50%";
-          popup.style.transform = "translateX(-50%)";
-          popup.style.background = getCategoryStyle(roastCategory);
-          popup.style.color = roastCategory === "Productif" ? "#000" : "#fff";
-          popup.style.padding = "14px 26px";
-          popup.style.borderRadius = "999px";
-          popup.style.zIndex = "2147483647";
-          popup.style.fontWeight = "bold";
-          popup.style.fontSize = "16px";
-          popup.style.boxShadow = "0 10px 30px rgba(0,0,0,0.45)";
-          popup.style.border = "1px solid rgba(255,255,255,0.25)";
-          popup.style.textAlign = "center";
-          popup.style.fontFamily = "Arial, sans-serif";
-          popup.style.pointerEvents = "none";
-
-          document.documentElement.appendChild(popup);
-
-          setTimeout(() => {
-            popup.remove();
-          }, 4500);
-        },
-        args: [message, category]
-      });
-    } catch {
-      console.log("Message non affichable sur cette page.");
-    }
+    console.log("Message non affichable sur cette page.");
   }
 }
 
 function getSessionElapsedMs(session) {
-  if (!session) {
-    return 0;
-  }
+  if (!session) return 0;
 
   let elapsedMs = Number(session.accumulatedMs) || 0;
 
@@ -155,9 +151,7 @@ function getSessionElapsedSeconds(session) {
 }
 
 function pauseSession(session) {
-  if (!session || !session.isActive) {
-    return session;
-  }
+  if (!session || !session.isActive) return session;
 
   return {
     ...session,
@@ -168,12 +162,51 @@ function pauseSession(session) {
 }
 
 function resumeSession(session) {
-  if (!session) {
-    return session;
-  }
+  if (!session) return session;
+  if (session.isActive) return session;
 
   return {
     ...session,
+    lastStartedAt: Date.now(),
+    isActive: true
+  };
+}
+
+function getTotalTrackingElapsedMs(totalTracking) {
+  if (!totalTracking) return 0;
+
+  let elapsedMs = Number(totalTracking.accumulatedMs) || 0;
+
+  if (totalTracking.isActive && totalTracking.lastStartedAt) {
+    elapsedMs += Date.now() - totalTracking.lastStartedAt;
+  }
+
+  return elapsedMs;
+}
+
+function pauseTotalTracking(totalTracking) {
+  return {
+    ...totalTracking,
+    accumulatedMs: getTotalTrackingElapsedMs(totalTracking),
+    lastStartedAt: null,
+    isActive: false
+  };
+}
+
+function resumeTotalTracking(totalTracking) {
+  if (!totalTracking) {
+    return {
+      startTime: Date.now(),
+      accumulatedMs: 0,
+      lastStartedAt: Date.now(),
+      isActive: true
+    };
+  }
+
+  if (totalTracking.isActive) return totalTracking;
+
+  return {
+    ...totalTracking,
     lastStartedAt: Date.now(),
     isActive: true
   };
@@ -196,12 +229,9 @@ async function startBackendSession(session) {
       })
     });
 
-    if (!response.ok) {
-      return null;
-    }
+    if (!response.ok) return null;
 
     const data = await response.json();
-
     return data.sessionId || data.id || null;
   } catch {
     console.log("Backend indisponible pour /sessions/start.");
@@ -210,9 +240,7 @@ async function startBackendSession(session) {
 }
 
 async function syncBackendSession(session) {
-  if (!session || !session.backendSessionId) {
-    return;
-  }
+  if (!session || !session.backendSessionId) return;
 
   try {
     await fetch(`${API_BASE_URL}/sessions/end`, {
@@ -230,19 +258,87 @@ async function syncBackendSession(session) {
   }
 }
 
+async function pauseActiveSession(clearCurrentSession = false) {
+  const data = await getStoredData();
+
+  const tabSessions = data.tabSessions;
+  const activeTabId = data.activeTabId;
+
+  let totalTracking = data.totalTracking;
+
+  if (totalTracking?.isActive) {
+    totalTracking = pauseTotalTracking(totalTracking);
+  }
+
+  let pausedSession = data.currentSession;
+
+  if (activeTabId && tabSessions[activeTabId]) {
+    pausedSession = pauseSession(tabSessions[activeTabId]);
+    tabSessions[activeTabId] = pausedSession;
+    await syncBackendSession(pausedSession);
+  }
+
+  await saveData({
+    tabSessions,
+    currentSession: clearCurrentSession ? null : pausedSession,
+    totalTracking,
+    activeTabId: clearCurrentSession ? null : activeTabId,
+    trackingStartedAt: data.trackingStartedAt
+  });
+}
+
+async function ignoreCurrentTab(tab) {
+  const data = await getStoredData();
+
+  const tabSessions = data.tabSessions;
+  const activeTabId = data.activeTabId;
+
+  let totalTracking = data.totalTracking;
+
+  if (totalTracking?.isActive) {
+    totalTracking = pauseTotalTracking(totalTracking);
+  }
+
+  if (activeTabId && tabSessions[activeTabId]) {
+    const pausedSession = pauseSession(tabSessions[activeTabId]);
+
+    tabSessions[activeTabId] = pausedSession;
+
+    await syncBackendSession(pausedSession);
+  }
+
+  await saveData({
+    tabSessions,
+    currentSession: null,
+    totalTracking,
+    activeTabId: null,
+    trackingStartedAt: data.trackingStartedAt
+  });
+
+  console.log("Page ignorée, timer total en pause :", tab?.url);
+}
+
 async function analyseTab(tab, shouldShowMessage = true) {
-  if (!tab || !tab.url || isBrowserInternalPage(tab.url)) {
+  if (!tab || !tab.url) return;
+
+  if (isBrowserInternalPage(tab.url)) {
+    await ignoreCurrentTab(tab);
+    return;
+  }
+
+  const domain = getDomainFromUrl(tab.url);
+  const pageContent = await getPageContent(tab.id);
+  const classification = classifySite(domain, tab.url, pageContent);
+
+  if (classification.source === "search_engine") {
+    await ignoreCurrentTab(tab);
     return;
   }
 
   const data = await getStoredData();
   const tabSessions = data.tabSessions;
-  const totalTracking = data.totalTracking;
+  let totalTracking = resumeTotalTracking(data.totalTracking);
   let activeTabId = data.activeTabId;
-
-  if (!totalTracking.startTime) {
-    totalTracking.startTime = Date.now();
-  }
 
   if (activeTabId && activeTabId !== tab.id && tabSessions[activeTabId]) {
     const oldSession = pauseSession(tabSessions[activeTabId]);
@@ -252,9 +348,6 @@ async function analyseTab(tab, shouldShowMessage = true) {
 
   activeTabId = tab.id;
 
-  const domain = getDomainFromUrl(tab.url);
-  const pageContent = await getPageContent(tab.id);
-  const classification = classifySite(domain, tab.url, pageContent);
   const openingMessage = getOpeningMessage(classification.category);
   const existingSession = tabSessions[tab.id];
 
@@ -279,12 +372,17 @@ async function analyseTab(tab, shouldShowMessage = true) {
       tabSessions,
       currentSession: resumedSession,
       totalTracking,
-      activeTabId
+      activeTabId,
+      trackingStartedAt: data.trackingStartedAt
     });
 
     await syncBackendSession(resumedSession);
 
-    if (shouldShowMessage && resumedSession.shouldShowPopup) {
+    if (
+      shouldShowMessage &&
+      resumedSession.shouldShowPopup &&
+      Date.now() > suppressPopupMessageUntil
+    ) {
       const messageToShow = categoryChanged
         ? openingMessage
         : resumedSession.message || openingMessage;
@@ -292,7 +390,6 @@ async function analyseTab(tab, shouldShowMessage = true) {
       await showRoastOnPage(tab.id, messageToShow, resumedSession.category);
     }
 
-    console.log("Session reprise :", resumedSession);
     return;
   }
 
@@ -327,14 +424,17 @@ async function analyseTab(tab, shouldShowMessage = true) {
     tabSessions,
     currentSession: newSession,
     totalTracking,
-    activeTabId
+    activeTabId,
+    trackingStartedAt: data.trackingStartedAt
   });
 
-  if (shouldShowMessage && newSession.shouldShowPopup) {
+  if (
+    shouldShowMessage &&
+    newSession.shouldShowPopup &&
+    Date.now() > suppressPopupMessageUntil
+  ) {
     await showRoastOnPage(tab.id, openingMessage, classification.category);
   }
-
-  console.log("Nouvelle session :", newSession);
 }
 
 async function checkTimedRoastMessages() {
@@ -342,15 +442,11 @@ async function checkTimedRoastMessages() {
   const tabSessions = data.tabSessions;
   const activeTabId = data.activeTabId;
 
-  if (!activeTabId || !tabSessions[activeTabId]) {
-    return;
-  }
+  if (!activeTabId || !tabSessions[activeTabId]) return;
 
   const session = tabSessions[activeTabId];
 
-  if (!session.isActive || session.shouldShowPopup === false) {
-    return;
-  }
+  if (!session.isActive || session.shouldShowPopup === false) return;
 
   const messages = timedRoastMessages[session.category] || [];
   const elapsedSeconds = getSessionElapsedSeconds(session);
@@ -373,7 +469,10 @@ async function checkTimedRoastMessages() {
 
       await saveData({
         tabSessions,
-        currentSession: updatedSession
+        currentSession: updatedSession,
+        activeTabId,
+        totalTracking: data.totalTracking,
+        trackingStartedAt: data.trackingStartedAt
       });
 
       await showRoastOnPage(activeTabId, roast.message, updatedSession.category);
@@ -387,15 +486,11 @@ async function syncActiveSessionToBackend() {
   const tabSessions = data.tabSessions;
   const activeTabId = data.activeTabId;
 
-  if (!activeTabId || !tabSessions[activeTabId]) {
-    return;
-  }
+  if (!activeTabId || !tabSessions[activeTabId]) return;
 
   const session = tabSessions[activeTabId];
 
-  if (!session.isActive) {
-    return;
-  }
+  if (!session.isActive) return;
 
   await syncBackendSession(session);
 }
@@ -425,25 +520,45 @@ chrome.tabs.onRemoved.addListener(async (tabId) => {
 
   if (tabSessions[tabId]) {
     const endedSession = pauseSession(tabSessions[tabId]);
-
     await syncBackendSession(endedSession);
 
     delete tabSessions[tabId];
 
     await saveData({
       tabSessions,
-      activeTabId: data.activeTabId === tabId ? null : data.activeTabId
+      currentSession: data.activeTabId === tabId ? null : data.currentSession,
+      activeTabId: data.activeTabId === tabId ? null : data.activeTabId,
+      totalTracking: data.totalTracking,
+      trackingStartedAt: data.trackingStartedAt
     });
   }
 });
 
 chrome.windows.onFocusChanged.addListener(async (windowId) => {
+  if (focusPauseTimeoutId) {
+    clearTimeout(focusPauseTimeoutId);
+    focusPauseTimeoutId = null;
+  }
+
+  if (Date.now() < suppressFocusUntil) return;
+
   if (windowId === chrome.windows.WINDOW_ID_NONE) {
+    focusPauseTimeoutId = setTimeout(async () => {
+      if (Date.now() < suppressFocusUntil) return;
+
+      await pauseActiveSession(false);
+      console.log("Changement application → pause réelle.");
+    }, 700);
+
     return;
   }
 
   try {
-    const tabs = await chrome.tabs.query({ active: true, windowId });
+    const tabs = await chrome.tabs.query({
+      active: true,
+      windowId
+    });
+
     const tab = tabs[0];
 
     if (tab) {
@@ -455,6 +570,27 @@ chrome.windows.onFocusChanged.addListener(async (windowId) => {
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.type === "POPUP_OPENED") {
+    suppressFocusUntil = Date.now() + 1200;
+    suppressPopupMessageUntil = Date.now() + 2000;
+
+    if (focusPauseTimeoutId) {
+      clearTimeout(focusPauseTimeoutId);
+      focusPauseTimeoutId = null;
+    }
+
+    sendResponse({ success: true });
+    return true;
+  }
+
+  if (message.type === "POPUP_CLOSED") {
+    suppressFocusUntil = Date.now() + 1200;
+    suppressPopupMessageUntil = Date.now() + 2000;
+
+    sendResponse({ success: true });
+    return true;
+  }
+
   if (message.type === "FORCE_ANALYSE_ACTIVE_TAB") {
     chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
       const tab = tabs[0];

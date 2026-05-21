@@ -1,4 +1,4 @@
-import { Controller, Get } from '@nestjs/common';
+import { Controller, Get, Query } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { StatsService } from './stats.service';
 
@@ -8,22 +8,22 @@ export class StatsController {
   constructor(private readonly statsService: StatsService) {}
 
   @Get('today')
-  getTodayStats() {
-    return this.statsService.getTodayStats();
+  getTodayStats(@Query('since') since?: string) {
+    return this.statsService.getTodayStats(since);
   }
 
   @Get('categories')
-  getStatsByCategory() {
-    return this.statsService.getStatsByCategory();
+  getStatsByCategory(@Query('since') since?: string) {
+    return this.statsService.getStatsByCategory(since);
   }
 
   @Get('sites')
-  getStatsBySite() {
-    return this.statsService.getStatsBySite();
+  getStatsBySite(@Query('since') since?: string) {
+    return this.statsService.getStatsBySite(since);
   }
 
   @Get('top-distractions')
-  getTopDistractions() {
-    return this.statsService.getTopDistractions();
+  getTopDistractions(@Query('since') since?: string) {
+    return this.statsService.getTopDistractions(since);
   }
 }

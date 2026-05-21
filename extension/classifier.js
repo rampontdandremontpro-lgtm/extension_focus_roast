@@ -34,6 +34,8 @@ export function classifySite(domain, url, pageContent = null) {
 
   const knownSites = {
     Productif: [
+      "cesar.emineo-informatique.fr",
+      "emineo-informatique.fr",
       "github.com",
       "gitlab.com",
       "stackoverflow.com",
@@ -104,11 +106,14 @@ export function classifySite(domain, url, pageContent = null) {
     ],
 
     Neutre: [
-      "mail.google.com",
-      "gmail.com",
-      "outlook.live.com",
-      "hotmail.com"
-    ]
+  "mail.google.com",
+  "gmail.com",
+  "outlook.live.com",
+  "outlook.cloud.microsoft",
+  "outlook.office.com",
+  "mail.office365.com",
+  "hotmail.com"
+]
   };
 
   for (const category in knownSites) {
@@ -172,7 +177,8 @@ export function classifySite(domain, url, pageContent = null) {
       "developer",
       "academy",
       "tutorial",
-      "documentation"
+      "documentation",
+      "exercice"
     ],
 
     Distraction: [
@@ -235,7 +241,9 @@ export function classifySite(domain, url, pageContent = null) {
         "exercice",
         "leçon",
         "certification",
-        "compétence"
+        "compétence",
+        "informatique",
+        "emineo"
       ],
 
       Distraction: [
@@ -273,7 +281,7 @@ export function getOpeningMessage(category) {
   }
 
   if (category === "Distraction") {
-    return "Encore ici ? 👀";
+    return "Encore ici ? ";
   }
 
   if (category === "E-commerce") {

@@ -1,5 +1,11 @@
 const API_BASE_URL = "http://localhost:3000";
 
+chrome.runtime.sendMessage({ type: "POPUP_OPENED" });
+
+window.addEventListener("beforeunload", () => {
+  chrome.runtime.sendMessage({ type: "POPUP_CLOSED" });
+});
+
 const domainElement = document.getElementById("domain");
 const categoryElement = document.getElementById("category");
 const sourceElement = document.getElementById("source");
@@ -10,7 +16,6 @@ const globalMessageElement = document.getElementById("globalMessage");
 const statsChartElement = document.getElementById("statsChart");
 
 let timerInterval = null;
-let statsInterval = null;
 let statsChart = null;
 
 function formatTime(milliseconds) {
@@ -44,6 +49,7 @@ function formatSecondsForChart(seconds) {
 function formatSource(source) {
   const labels = {
     known_site: "Site connu",
+    domain_keyword: "Mot-clé domaine",
     url_keyword: "Mot-clé URL",
     page_content: "Contenu page",
     neutral: "Neutre",
@@ -81,6 +87,20 @@ function getCurrentElapsed(session) {
   return accumulatedMs;
 }
 
+function getTotalElapsed(totalTracking) {
+  if (!totalTracking) {
+    return 0;
+  }
+
+  let elapsedMs = Number(totalTracking.accumulatedMs) || 0;
+
+  if (totalTracking.isActive && totalTracking.lastStartedAt) {
+    elapsedMs += Date.now() - totalTracking.lastStartedAt;
+  }
+
+  return elapsedMs;
+}
+
 async function loadCurrentSession() {
   const result = await chrome.storage.local.get([
     "currentSession",
@@ -90,14 +110,14 @@ async function loadCurrentSession() {
   let session = result.currentSession;
 
   if (!session) {
-    domainElement.textContent = "Aucun site détecté";
-    categoryElement.textContent = "Inconnue";
-    sourceElement.textContent = "Inconnue";
-    messageElement.textContent = "Ouvre un site pour commencer.";
-    pageTimerElement.textContent = "00:00:00";
-    totalTimerElement.textContent = "00:00:00";
-    return;
-  }
+  domainElement.textContent = "Page ignorée";
+  categoryElement.textContent = "Neutre";
+  sourceElement.textContent = "Non trackée";
+  messageElement.textContent = "Cette page n’est pas comptée.";
+  pageTimerElement.textContent = "00:00:00";
+  totalTimerElement.textContent = formatTime(getTotalElapsed(result.totalTracking));
+  return;
+}
 
   domainElement.textContent = session.domain;
   categoryElement.textContent = session.category;
@@ -120,14 +140,7 @@ async function loadCurrentSession() {
     session = freshData.currentSession;
 
     pageTimerElement.textContent = formatTime(getCurrentElapsed(session));
-
-    if (freshData.totalTracking?.startTime) {
-      totalTimerElement.textContent = formatTime(
-        Date.now() - freshData.totalTracking.startTime
-      );
-    } else {
-      totalTimerElement.textContent = "00:00:00";
-    }
+    totalTimerElement.textContent = formatTime(getTotalElapsed(freshData.totalTracking));
 
     if (session) {
       domainElement.textContent = session.domain;
@@ -142,7 +155,14 @@ async function loadCurrentSession() {
 
 async function loadTodayStats() {
   try {
-    const response = await fetch(`${API_BASE_URL}/stats/today`);
+    const storage = await chrome.storage.local.get(["trackingStartedAt"]);
+    const since = storage.trackingStartedAt;
+
+    const statsUrl = since
+      ? `${API_BASE_URL}/stats/today?since=${encodeURIComponent(since)}`
+      : `${API_BASE_URL}/stats/today`;
+
+    const response = await fetch(statsUrl);
 
     if (!response.ok) {
       throw new Error("Erreur API stats");
@@ -163,7 +183,7 @@ async function loadTodayStats() {
       stats.globalMessage || "Stats chargées.";
 
     if (totalSeconds === 0) {
-      globalMessageElement.textContent = "Aucune session enregistrée aujourd’hui.";
+      globalMessageElement.textContent = "Aucune session enregistrée pour cette session Chrome.";
 
       if (statsChart) {
         statsChart.data.datasets[0].data = [0, 0, 0, 0];
@@ -223,6 +243,6 @@ async function loadTodayStats() {
 loadCurrentSession();
 loadTodayStats();
 
-statsInterval = setInterval(() => {
+setInterval(() => {
   loadTodayStats();
 }, 1000);

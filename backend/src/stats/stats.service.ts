@@ -24,11 +24,59 @@ export class StatsService {
     return today;
   }
 
+  private getStartDate(since?: string): Date {
+    if (!since) {
+      return this.getTodayDate();
+    }
+
+    const parsedDate = new Date(since);
+
+    if (Number.isNaN(parsedDate.getTime())) {
+      return this.getTodayDate();
+    }
+
+    return parsedDate;
+  }
+
+  private getEmptyStats(): CategoryStats {
+    return {
+      Productif: 0,
+      Distraction: 0,
+      'E-commerce': 0,
+      Neutre: 0,
+    };
+  }
+
+  private calculatePercentages(stats: CategoryStats): CategoryStats {
+    const total =
+      stats.Productif + stats.Distraction + stats['E-commerce'] + stats.Neutre;
+
+    if (total === 0) {
+      return this.getEmptyStats();
+    }
+
+    return {
+      Productif: Math.round((stats.Productif / total) * 100),
+      Distraction: Math.round((stats.Distraction / total) * 100),
+      'E-commerce': Math.round((stats['E-commerce'] / total) * 100),
+      Neutre: Math.round((stats.Neutre / total) * 100),
+    };
+  }
+
   private getDominantCategory(stats: CategoryStats): keyof CategoryStats {
     return Object.entries(stats).sort((a, b) => b[1] - a[1])[0][0] as keyof CategoryStats;
   }
 
-  private getGlobalMessage(dominantCategory: keyof CategoryStats): string {
+  private getGlobalMessage(stats: CategoryStats): string {
+    const total =
+      stats.Productif + stats.Distraction + stats['E-commerce'] + stats.Neutre;
+
+    if (total === 0) {
+      return 'Aucune session enregistrée pour cette session Chrome.';
+    }
+
+    const dominantCategory = this.getDominantCategory(stats);
+
     if (dominantCategory === 'Productif') {
       return 'On peut qu’applaudir la performance';
     }
@@ -44,31 +92,10 @@ export class StatsService {
     return 'Navigation tranquille, rien d’alarmant';
   }
 
-  private calculatePercentages(stats: CategoryStats): CategoryStats {
-    const total =
-      stats.Productif + stats.Distraction + stats['E-commerce'] + stats.Neutre;
-
-    if (total === 0) {
-      return {
-        Productif: 0,
-        Distraction: 0,
-        'E-commerce': 0,
-        Neutre: 0,
-      };
-    }
-
-    return {
-      Productif: Math.round((stats.Productif / total) * 100),
-      Distraction: Math.round((stats.Distraction / total) * 100),
-      'E-commerce': Math.round((stats['E-commerce'] / total) * 100),
-      Neutre: Math.round((stats.Neutre / total) * 100),
-    };
-  }
-
-  async getTodayStats() {
-    const sessions = await this.sessionRepository.find({
+  private async getSessionsFromDate(startDate: Date) {
+    return this.sessionRepository.find({
       where: {
-        createdAt: MoreThanOrEqual(this.getTodayDate()),
+        createdAt: MoreThanOrEqual(startDate),
       },
       relations: {
         site: {
@@ -76,87 +103,69 @@ export class StatsService {
         },
       },
     });
+  }
 
-    const stats: CategoryStats = {
-      Productif: 0,
-      Distraction: 0,
-      'E-commerce': 0,
-      Neutre: 0,
-    };
+  async getTodayStats(since?: string) {
+    const startDate = this.getStartDate(since);
+    const sessions = await this.getSessionsFromDate(startDate);
+
+    const stats = this.getEmptyStats();
 
     for (const session of sessions) {
-      const categoryName = session.site.category.name as keyof CategoryStats;
+      const categoryName = session.site?.category?.name as keyof CategoryStats;
 
       if (categoryName in stats) {
-        stats[categoryName] += session.durationSeconds;
+        stats[categoryName] += session.durationSeconds || 0;
       }
     }
 
-    const percentages = this.calculatePercentages(stats);
-    const dominantCategory = this.getDominantCategory(stats);
-    const globalMessage = this.getGlobalMessage(dominantCategory);
-
     return {
       ...stats,
-      percentages,
-      globalMessage,
+      percentages: this.calculatePercentages(stats),
+      globalMessage: this.getGlobalMessage(stats),
     };
   }
 
-  async getStatsByCategory() {
-    return this.getTodayStats();
+  async getStatsByCategory(since?: string) {
+    return this.getTodayStats(since);
   }
 
-  async getStatsBySite() {
-    const sessions = await this.sessionRepository.find({
-      where: {
-        createdAt: MoreThanOrEqual(this.getTodayDate()),
-      },
-      relations: {
-        site: {
-          category: true,
-        },
-      },
-    });
+  async getStatsBySite(since?: string) {
+    const startDate = this.getStartDate(since);
+    const sessions = await this.getSessionsFromDate(startDate);
 
     const stats: Record<string, number> = {};
 
     for (const session of sessions) {
-      const siteName = session.site.name;
+      const siteName = session.site?.name || session.site?.domain || 'Site inconnu';
 
       if (!stats[siteName]) {
         stats[siteName] = 0;
       }
 
-      stats[siteName] += session.durationSeconds;
+      stats[siteName] += session.durationSeconds || 0;
     }
 
     return stats;
   }
 
-  async getTopDistractions() {
-    const sessions = await this.sessionRepository.find({
-      where: {
-        createdAt: MoreThanOrEqual(this.getTodayDate()),
-      },
-      relations: {
-        site: {
-          category: true,
-        },
-      },
-    });
+  async getTopDistractions(since?: string) {
+    const startDate = this.getStartDate(since);
+    const sessions = await this.getSessionsFromDate(startDate);
 
     const stats: Record<string, number> = {};
 
     for (const session of sessions) {
-      if (session.site.category.name === 'Distraction') {
-        const siteName = session.site.name;
+      const categoryName = session.site?.category?.name;
+
+      if (categoryName === 'Distraction') {
+        const siteName = session.site?.name || session.site?.domain || 'Site inconnu';
 
         if (!stats[siteName]) {
           stats[siteName] = 0;
         }
 
-        stats[siteName] += session.durationSeconds;
+        stats[siteName] += session.durationSeconds || 0;
       }
     }
 
